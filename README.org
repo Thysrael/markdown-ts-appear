@@ -1,5 +1,9 @@
 #+title: markdown-ts-appear
 
+[[file:examples/demo.svg]]
+
+[[file:examples/appear.gif]]
+
 Reveal the source of the rendered Markdown element at point in Emacs'
 built-in ~markdown-ts-mode~.  LaTeX fragments are rendered asynchronously
 with MathJax while they are not being edited.
