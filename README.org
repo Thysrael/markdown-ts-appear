@@ -1,9 +1,9 @@
 #+title: markdown-ts-appear
 
-[[https://github.com/Thysrael/markdown-ts-appear/actions/workflows/ci.yml][https://img.shields.io/github/actions/workflow/status/Thysrael/markdown-ts-appear/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=build]]
-[[https://github.com/Thysrael/markdown-ts-appear/releases/latest][https://img.shields.io/github/v/release/Thysrael/markdown-ts-appear?display_name=tag&sort=semver&style=flat-square&logo=github&logoColor=white]]
-[[https://www.gnu.org/software/emacs/][https://img.shields.io/badge/Emacs-31.1%2B-7F5AB6?style=flat-square&logo=gnuemacs&logoColor=white]]
-[[file:COPYING][https://img.shields.io/github/license/Thysrael/markdown-ts-appear?style=flat-square&color=blue]]
+[[https://github.com/Thysrael/markdown-ts-appear/actions/workflows/ci.yml][file:https://img.shields.io/github/actions/workflow/status/Thysrael/markdown-ts-appear/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=build#.svg]]
+[[https://github.com/Thysrael/markdown-ts-appear/releases/latest][file:https://img.shields.io/github/v/release/Thysrael/markdown-ts-appear?display_name=tag&sort=semver&style=flat-square&logo=github&logoColor=white#.svg]]
+[[https://www.gnu.org/software/emacs/][file:https://img.shields.io/badge/Emacs-31.1%2B-7F5AB6?style=flat-square&logo=gnuemacs&logoColor=white#.svg]]
+[[file:COPYING][file:https://img.shields.io/github/license/Thysrael/markdown-ts-appear?style=flat-square&color=blue#.svg]]
 
 [[file:examples/appear.gif]]
 
