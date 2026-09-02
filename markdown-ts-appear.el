@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Thysrael
 
 ;; Author: Thysrael <thysrael@163.com>
+;; Assisted-by: OpenCode:gpt-5.6-sol
 ;; Maintainer: Thysrael <thysrael@163.com>
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "31.1") (mathjax "0.1"))
