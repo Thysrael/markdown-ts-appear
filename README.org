@@ -1,0 +1,60 @@
+#+title: markdown-ts-appear
+
+Reveal the source of the rendered Markdown element at point in Emacs'
+built-in ~markdown-ts-mode~.  LaTeX fragments are rendered asynchronously
+with MathJax while they are not being edited.
+
+* Requirements
+
+- Emacs 31.1 or newer
+- The ~markdown~ and ~markdown-inline~ Tree-sitter grammars
+- Node.js for MathJax rendering
+
+The ~mathjax~ Emacs package is declared as a package dependency and is loaded
+only when math preview can be displayed.
+
+* Installation
+
+With ~use-package~ and ~package-vc~:
+
+#+begin_src emacs-lisp
+(use-package markdown-ts-appear
+  :vc (markdown-ts-appear
+       :url "https://github.com/Thysrael/markdown-ts-appear"
+       :rev :newest)
+  :hook (markdown-ts-mode . markdown-ts-appear-mode))
+#+end_src
+
+Markup is hidden automatically and the smallest semantic element at point is
+revealed.  Math preview is enabled by default when Emacs has SVG support and
+the buffer is displayed in a graphical frame.
+
+* Evil
+
+Evil is optional.  To reveal source only while editing:
+
+#+begin_src emacs-lisp
+(setq markdown-ts-appear-trigger 'evil-insert)
+#+end_src
+
+* Options
+
+- ~markdown-ts-appear-trigger~ controls when source is revealed.
+- ~markdown-ts-appear-enable-math-preview~ enables MathJax previews.
+- ~markdown-ts-appear-math-timeout~ controls rendering timeouts.
+
+* Development
+
+Run the tests with:
+
+#+begin_src shell
+emacs --batch -Q -L . -l test/markdown-ts-appear-test.el \
+  -f ert-run-tests-batch-and-exit
+#+end_src
+
+Tests that require the Markdown Tree-sitter grammars are skipped when the
+grammars are unavailable.
+
+* License
+
+GNU General Public License version 3 or later.
