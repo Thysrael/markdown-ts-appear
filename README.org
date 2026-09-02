@@ -74,12 +74,15 @@ the network.
 Run the tests with:
 
 #+begin_src shell
-emacs --batch -Q -L . -l test/markdown-ts-appear-test.el \
+MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1 emacs --batch -Q -L . \
+  --eval '(progn (require (quote package)) (package-initialize))' \
+  -l test/markdown-ts-appear-test.el \
   -f ert-run-tests-batch-and-exit
 #+end_src
 
 Tests that require the Markdown Tree-sitter grammars are skipped when the
-grammars are unavailable.
+grammars are unavailable.  The command above requires the ~mathjax~ package
+and Node.js so that it also exercises a real MathJax-to-SVG render.
 
 * License
 

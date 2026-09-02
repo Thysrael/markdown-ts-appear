@@ -24,6 +24,9 @@
 (require 'ert)
 (require 'cl-lib)
 
+(declare-function mathjax-available-p "mathjax")
+(declare-function mathjax-render "mathjax")
+
 (add-to-list 'load-path
              (file-name-directory
               (directory-file-name
@@ -355,6 +358,22 @@
   (let ((markdown-ts-appear-math-scale 1.25))
     (should (equal (markdown-ts-appear--math-key "x" t)
                    '(t 1.25 "x")))))
+
+(ert-deftest markdown-ts-appear-test-mathjax-render-smoke ()
+  (if (getenv "MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX")
+      (progn
+        (should (require 'mathjax nil t))
+        (should (mathjax-available-p)))
+    (skip-unless (and (require 'mathjax nil t)
+                      (mathjax-available-p))))
+  (let (result)
+    (mathjax-render (lambda (data) (setq result data)) "x^2")
+    (let ((deadline (+ (float-time) 10)))
+      (while (and (not result) (< (float-time) deadline))
+        (accept-process-output nil 0.05)))
+    (should result)
+    (should-not (alist-get 'error result))
+    (should (string-match-p "<svg\\b" (alist-get 'svg result)))))
 
 (ert-deftest markdown-ts-appear-test-copy-filter-preserves-owned-display ()
   (let ((text (propertize "ab" 'display 'other-package)))

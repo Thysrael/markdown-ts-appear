@@ -36,11 +36,24 @@ jobs:
                     (markdown-inline
                      \"https://github.com/tree-sitter-grammars/tree-sitter-markdown\"
                      :commit \"413285231ce8fa8b11e7074bbe265b48aa7277f9\"
-                     :source-dir \"tree-sitter-markdown-inline/src\")))
+                     :source-dir \"tree-sitter-markdown-inline/src\")
+                    (c
+                     \"https://github.com/tree-sitter/tree-sitter-c\"
+                     :commit \"3aa2995549d5d8b26928e8d3fa2770fd4327414e\")))
             (mapc #'treesit-install-language-grammar
-                  '(markdown markdown-inline))
-            (unless (treesit-ready-p '(markdown markdown-inline))
-              (error \"Markdown Tree-sitter grammars are unavailable\")))"
+                  '(markdown markdown-inline c))
+            (unless (treesit-ready-p '(markdown markdown-inline c))
+              (error \"Required Tree-sitter grammars are unavailable\")))"
+
+      - name: Install package dependencies
+        run: |
+          emacs --batch -Q --eval "(progn
+            (require 'package)
+            (package-refresh-contents)
+            (package-install 'mathjax)
+            (unless (and (require 'mathjax nil t)
+                         (mathjax-available-p))
+              (error \"MathJax or Node.js is unavailable\")))"
 
       - name: Byte-compile
         run: |
@@ -61,8 +74,11 @@ jobs:
               (kill-emacs 1)))"
 
       - name: Run tests
+        env:
+          MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX: "1"
         run: |
           emacs --batch -Q -L . \
+            --eval '(progn (require (quote package)) (package-initialize))' \
             -l test/markdown-ts-appear-test.el \
             -f ert-run-tests-batch-and-exit
 
