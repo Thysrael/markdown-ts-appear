@@ -1,7 +1,5 @@
 #+title: markdown-ts-appear
 
-[[file:examples/demo.svg]]
-
 [[file:examples/appear.gif]]
 
 Reveal the source of the rendered Markdown element at point in Emacs'
