@@ -332,6 +332,30 @@
       (markdown-ts-appear--math-clear (point-min) (point-max))
       (should-not (overlays-in (point-min) (point-max))))))
 
+(ert-deftest markdown-ts-appear-test-scales-math-svg ()
+  (let ((markdown-ts-appear-math-scale 1.1))
+    (cl-letf (((symbol-function 'svg-image)
+               (lambda (svg &rest properties)
+                 (cons svg properties))))
+      (let* ((image
+              (markdown-ts-appear--math-image
+               (concat "<svg width=\"2ex\" height=\"3ex\">"
+                       "<rect width=\"4\" height=\"5\"/></svg>")))
+             (svg (car image))
+             (properties (cdr image)))
+        (should (string-match-p "width=\"2.2ex\"" svg))
+        (should (string-match-p "height=\"3.3ex\"" svg))
+        (should (string-match-p "<rect width=\"4\" height=\"5\"" svg))
+        (should-not (plist-member properties :scale))))))
+
+(ert-deftest markdown-ts-appear-test-math-cache-key-includes-scale ()
+  (let ((markdown-ts-appear-math-scale 1.1))
+    (should (equal (markdown-ts-appear--math-key "x" nil)
+                   '(nil 1.1 "x"))))
+  (let ((markdown-ts-appear-math-scale 1.25))
+    (should (equal (markdown-ts-appear--math-key "x" t)
+                   '(t 1.25 "x")))))
+
 (ert-deftest markdown-ts-appear-test-copy-filter-preserves-owned-display ()
   (let ((text (propertize "ab" 'display 'other-package)))
     (put-text-property 0 1 'markdown-ts-appear--math-state 'rendered text)
@@ -371,12 +395,13 @@
   (let ((markdown-ts-appear--math-cache (make-hash-table :test #'equal))
         (calls 0))
     (cl-letf (((symbol-function 'markdown-ts-appear--math-image)
-               (lambda (_svg)
+               (lambda (_svg &optional _scale)
                  (setq calls (1+ calls))
                  (list 'image calls))))
       (markdown-ts-appear--math-finish-render
-       'test-key '((svg . "<svg height=\"1\"></svg>")))
-      (let ((data (gethash 'test-key markdown-ts-appear--math-cache)))
+       '(nil 1.1 "x") '((svg . "<svg height=\"1\"></svg>")))
+      (let ((data (gethash '(nil 1.1 "x")
+                           markdown-ts-appear--math-cache)))
         (should (= calls 1))
         (should (equal (alist-get 'markdown-ts-appear--math-image data)
                        '(image 1)))))))

@@ -51,6 +51,7 @@ Evil is optional.  To reveal source only while editing:
 - ~markdown-ts-appear-enable-math-preview~ enables MathJax previews.
 - ~markdown-ts-appear-math-timeout~ controls rendering timeouts.
 - ~markdown-ts-appear-center-display-math~ controls display math alignment.
+- ~markdown-ts-appear-math-scale~ controls formula size and defaults to ~1.1~.
 - ~markdown-ts-appear-use-nerd-icons~ controls link and image prefix icons.
 
 * Demo

@@ -76,6 +76,13 @@ an optional dependency."
   :type 'boolean
   :group 'markdown-ts-appear)
 
+(defcustom markdown-ts-appear-math-scale 1.1
+  "Scale factor applied to rendered MathJax formulas.
+This scales the SVG's intrinsic dimensions without replacing Emacs' automatic
+high-DPI image scaling."
+  :type 'number
+  :group 'markdown-ts-appear)
+
 (defcustom markdown-ts-appear-use-nerd-icons t
   "Whether to use Nerd Icons for rendered links and images when available.
 When this is nil, links receive no prefix icon.  Image destinations without
@@ -425,18 +432,40 @@ alt text remain visible."
                   end))
       state)))
 
-(defun markdown-ts-appear--math-image (svg)
-  "Create an image from MathJax SVG with a suitable baseline."
-  (let* ((height
-          (and (string-match "height=\"\\([-.0-9]+\\)" svg)
-               (string-to-number (match-string 1 svg))))
+(defun markdown-ts-appear--math-scale-svg (svg scale)
+  "Return SVG with its intrinsic dimensions multiplied by SCALE."
+  (unless (and (numberp scale) (> scale 0))
+    (error "Math scale must be a positive number"))
+  (dolist (attribute '("width" "height") svg)
+    (let* ((prefix (concat attribute "=\""))
+           (regexp (concat (regexp-quote prefix) "\\([-.0-9]+\\)")))
+      (when (string-match regexp svg)
+        (setq svg
+              (replace-match
+               (concat prefix
+                       (format "%.12g"
+                               (* scale
+                                  (string-to-number (match-string 1 svg)))))
+               t t svg))))))
+
+(defun markdown-ts-appear--math-key (math display-p)
+  "Return the cache key for MATH rendered with DISPLAY-P styling."
+  (list display-p markdown-ts-appear-math-scale math))
+
+(defun markdown-ts-appear--math-image (svg &optional scale)
+  "Create an image from MathJax SVG with a suitable baseline and SCALE."
+  (let* ((scale (or scale markdown-ts-appear-math-scale))
+         (height
+           (and (string-match "height=\"\\([-.0-9]+\\)" svg)
+                (string-to-number (match-string 1 svg))))
          (vertical-align
           (and (string-match "vertical-align: \\([-.0-9]+\\)" svg)
                (string-to-number (match-string 1 svg))))
-         (ascent (if (and height vertical-align (> height 0))
-                     (round (* 100 (/ (+ height vertical-align) height)))
-                   100)))
-    (svg-image svg :ascent (max 0 (min 100 ascent)))))
+          (ascent (if (and height vertical-align (> height 0))
+                      (round (* 100 (/ (+ height vertical-align) height)))
+                    100)))
+    (svg-image (markdown-ts-appear--math-scale-svg svg scale)
+               :ascent (max 0 (min 100 ascent)))))
 
 (defun markdown-ts-appear--math-center (beg end image)
   "Center IMAGE displayed between BEG and END with an owned overlay."
@@ -479,7 +508,9 @@ alt text remain visible."
                   (pcase-let ((`(,node-beg ,node-end ,math ,display-p)
                                node-data))
                     (when (and (= beg node-beg) (= end node-end)
-                               (equal key (cons display-p math)))
+                               (equal key
+                                      (markdown-ts-appear--math-key
+                                       math display-p)))
                       (setq displayed-p t)
                       (markdown-ts-appear--math-clear beg end)
                       (with-silent-modifications
@@ -488,7 +519,8 @@ alt text remain visible."
                                    (or
                                     (alist-get
                                      'markdown-ts-appear--math-image data)
-                                    (markdown-ts-appear--math-image svg))))
+                                    (markdown-ts-appear--math-image
+                                     svg (nth 1 key)))))
                               (put-text-property beg end 'display image)
                               (when display-p
                                 (markdown-ts-appear--math-center
@@ -511,7 +543,7 @@ alt text remain visible."
   "Cache MathJax DATA for KEY and complete its waiting requests."
   (when-let* ((svg (alist-get 'svg data)))
     (push (cons 'markdown-ts-appear--math-image
-                (markdown-ts-appear--math-image svg))
+                (markdown-ts-appear--math-image svg (nth 1 key)))
           data))
   (unless (alist-get 'transient data)
     (when (>= (hash-table-count markdown-ts-appear--math-cache) 512)
@@ -579,7 +611,7 @@ alt text remain visible."
 
 (defun markdown-ts-appear--math-request (beg end math display-p)
   "Render MATH asynchronously for the region from BEG to END."
-  (let* ((key (cons display-p math))
+  (let* ((key (markdown-ts-appear--math-key math display-p))
          (state (markdown-ts-appear--math-state beg end))
          (cached (gethash key markdown-ts-appear--math-cache
                           markdown-ts-appear--math-cache-miss)))
