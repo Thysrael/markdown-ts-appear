@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="180" viewBox="0 0 720 180">
+  <rect width="720" height="180" rx="24" fill="#171923"/>
+  <path d="M68 126V54h18l30 38 30-38h18v72h-20V84l-28 35-28-35v42z" fill="#7dd3fc"/>
+  <text x="194" y="90" fill="#f8fafc" font-family="sans-serif" font-size="30" font-weight="700">markdown-ts-appear</text>
+  <text x="194" y="126" fill="#a5b4fc" font-family="sans-serif" font-size="19">source appears where you point</text>
+</svg>

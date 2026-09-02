@@ -8,10 +8,11 @@ with MathJax while they are not being edited.
 
 - Emacs 31.1 or newer
 - The ~markdown~ and ~markdown-inline~ Tree-sitter grammars
-- Node.js for MathJax rendering
+- Node.js when MathJax preview is enabled
 
-The ~mathjax~ Emacs package is declared as a package dependency and is loaded
-only when math preview can be displayed.
+The ~mathjax~ Emacs package is declared as a package dependency.  Preview is
+attempted only in a graphical SVG-capable session and remains disabled when
+MathJax cannot find Node.js.
 
 * Installation
 
@@ -25,9 +26,16 @@ With ~use-package~ and ~package-vc~:
   :hook (markdown-ts-mode . markdown-ts-appear-mode))
 #+end_src
 
-Markup is hidden automatically and the smallest semantic element at point is
-revealed.  Math preview is enabled by default when Emacs has SVG support and
-the buffer is displayed in a graphical frame.
+Markup is hidden automatically, rendered links and images receive an icon, and
+the smallest semantic element at point is revealed.  Images without alt text
+keep their file name visible.  Fenced code block delimiters, info strings, and
+block quote markers remain visible instead of becoming empty lines.  Display
+math is centered by default.  Math preview is enabled when Emacs has SVG
+support and the buffer is displayed in a graphical frame.
+
+Image icons are enabled by this package.  To render the image files themselves,
+also enable the built-in ~markdown-ts-inline-images~ option or run
+~markdown-ts-toggle-inline-images~.
 
 * Evil
 
@@ -42,6 +50,16 @@ Evil is optional.  To reveal source only while editing:
 - ~markdown-ts-appear-trigger~ controls when source is revealed.
 - ~markdown-ts-appear-enable-math-preview~ enables MathJax previews.
 - ~markdown-ts-appear-math-timeout~ controls rendering timeouts.
+- ~markdown-ts-appear-center-display-math~ controls display math alignment.
+- ~markdown-ts-appear-use-nerd-icons~ controls link and image prefix icons.
+
+* Demo
+
+Open [[file:examples/demo.md][examples/demo.md]] in ~markdown-ts-mode~ to exercise headings, inline markup,
+links, images, lists, tasks, tables, MathJax previews, and other revealable
+elements.  Math examples use the delimiters supported by the Markdown grammar:
+~$...$~ and ~$$...$$~.  The local SVG keeps the image example independent of
+the network.
 
 * Development
 
@@ -57,4 +75,4 @@ grammars are unavailable.
 
 * License
 
-GNU General Public License version 3 or later.
+GNU General Public License version 3 or later.  See [[file:COPYING][COPYING]].
