@@ -53,15 +53,15 @@ configuration.
 
 * Visual Decorations
 
-Decoration values are plain strings and do not require an icon package.  A
-cons cell selects its first string when every character is displayable and its
-fallback otherwise.  For example:
+Icon and quote marker values are plain strings and do not require an icon
+package.  A cons cell selects its first string when every character is
+displayable and its fallback otherwise.  For example:
 
 #+begin_src emacs-lisp
 (setq markdown-ts-appear-link-icon '("" . "↗")
       markdown-ts-appear-image-icon '("" . "▧")
-      markdown-ts-appear-code-fence-marker "▣"
-      markdown-ts-appear-block-quote-open-marker "❝"
+      markdown-ts-appear-code-fence-style 'connected
+      markdown-ts-appear-block-quote-marker "▎"
       markdown-ts-appear-table-style 'unicode)
 #+end_src
 
@@ -110,12 +110,11 @@ Evil is optional.  To reveal source only while editing:
 - ~markdown-ts-appear-link-icon~, ~markdown-ts-appear-image-icon~, and
   ~markdown-ts-appear-wikilink-icon~ control link prefix icons and default to
   nil.
-- ~markdown-ts-appear-code-fence-marker~ controls rendered fence markers and
-  defaults to nil.
-- ~markdown-ts-appear-code-fence-show-closing-marker~ controls whether closing
-  fences reuse that marker and defaults to nil.
-- ~markdown-ts-appear-block-quote-open-marker~ controls the opening quotation
-  mark and defaults to nil.
+- ~markdown-ts-appear-code-fence-style~ is either ~raw~ or ~connected~ and
+  defaults to ~raw~.  The connected style displays ~╭─[ language ]~, prefixes
+  code lines with ~│~, and displays ~╰─~ for the closing fence.
+- ~markdown-ts-appear-block-quote-marker~ controls the marker displayed on each
+  quoted line and defaults to nil.
 - ~markdown-ts-appear-table-style~ is either ~raw~ or ~unicode~ and defaults to
   ~raw~.  The Unicode style replaces existing pipe-table delimiters without
   adding or aligning borders.

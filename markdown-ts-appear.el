@@ -123,23 +123,14 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                        (string :tag "Fallback")))
   :group 'markdown-ts-appear)
 
-(defcustom markdown-ts-appear-code-fence-marker nil
-  "Marker replacing an opening fenced code block delimiter.
-The value has the same form as `markdown-ts-appear-link-icon'."
-  :type '(choice (const :tag "Display raw delimiter" nil)
-                 (string :tag "Marker")
-                 (cons :tag "Preferred and fallback"
-                       (string :tag "Preferred")
-                       (string :tag "Fallback")))
+(defcustom markdown-ts-appear-code-fence-style 'raw
+  "How rendered fenced code blocks should display their delimiters."
+  :type '(choice (const :tag "Raw Markdown" raw)
+                  (const :tag "Connected Unicode lines" connected))
   :group 'markdown-ts-appear)
 
-(defcustom markdown-ts-appear-code-fence-show-closing-marker nil
-  "Whether to display the configured marker for closing code fences."
-  :type 'boolean
-  :group 'markdown-ts-appear)
-
-(defcustom markdown-ts-appear-block-quote-open-marker nil
-  "Marker replacing the first marker of a rendered block quote.
+(defcustom markdown-ts-appear-block-quote-marker nil
+  "Marker replacing each marker of a rendered block quote.
 The value has the same form as `markdown-ts-appear-link-icon'."
   :type '(choice (const :tag "Display raw marker" nil)
                  (string :tag "Marker")
@@ -204,6 +195,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
 (defvar-local markdown-ts-appear--managed-line-height-p nil
   "Non-nil when appear mode added `line-height' to managed properties.")
 
+(defvar-local markdown-ts-appear--managed-code-prefix-properties nil
+  "Code prefix properties added to `font-lock-extra-managed-props'.")
+
 (defvar-local markdown-ts-appear--notified-parsers nil
   "Tree-sitter parsers carrying the package change notifier.")
 
@@ -229,6 +223,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   "Non-nil while cleanup is running for a buffer being discarded.")
 
 (defvar markdown-ts-appear--quote-font-lock-settings)
+(defvar markdown-ts-appear--code-font-lock-settings)
 (defvar markdown-ts-appear--table-font-lock-settings)
 
 (defvar markdown-ts-appear--math-cache (make-hash-table :test #'equal)
@@ -301,6 +296,15 @@ The value has the same form as `markdown-ts-appear-link-icon'."
     (with-silent-modifications
       (put-text-property beg end 'display display)
       (put-text-property beg end 'markdown-ts-appear--decoration t))))
+
+(defun markdown-ts-appear--decorate-line-prefix (beg end prefix face)
+  "Display PREFIX with FACE before visual lines between BEG and END."
+  (let ((display (copy-sequence prefix)))
+    (add-face-text-property 0 (length display) face t display)
+    (with-silent-modifications
+      (add-text-properties
+       beg end `(line-prefix ,display wrap-prefix ,display
+                 markdown-ts-appear--decoration t)))))
 
 (defun markdown-ts-appear--node-ancestor (node type)
   "Return NODE or its nearest ancestor whose type is TYPE."
@@ -1055,7 +1059,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                    pos 'markdown-ts-appear--decoration text end)))
         (when (get-text-property pos 'markdown-ts-appear--decoration text)
           (remove-text-properties
-           pos next '(display nil markdown-ts-appear--decoration nil) text))
+           pos next '(display nil line-prefix nil wrap-prefix nil
+                      markdown-ts-appear--decoration nil)
+           text))
         (setq pos next))))
   text)
 
@@ -1078,17 +1084,31 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   (unless markdown-ts-appear--block-font-lock-installed-p
     (let ((settings
            (append
-            (and markdown-ts-appear-block-quote-open-marker
-                 markdown-ts-appear--quote-font-lock-settings)
-            (and (eq markdown-ts-appear-table-style 'unicode)
-                 markdown-ts-appear--table-font-lock-settings))))
+             (and markdown-ts-appear-block-quote-marker
+                  markdown-ts-appear--quote-font-lock-settings)
+             (and (eq markdown-ts-appear-code-fence-style 'connected)
+                  markdown-ts-appear--code-font-lock-settings)
+             (and (eq markdown-ts-appear-table-style 'unicode)
+                  markdown-ts-appear--table-font-lock-settings))))
       (when settings
         (setq treesit-font-lock-settings
               (append treesit-font-lock-settings settings))
         (setq markdown-ts-appear--block-font-lock-installed-p t))))
   (add-to-list 'font-lock-extra-managed-props
                'markdown-ts-appear--decoration)
+  (when (eq markdown-ts-appear-code-fence-style 'connected)
+    (dolist (property '(line-prefix wrap-prefix))
+      (unless (memq property font-lock-extra-managed-props)
+        (push property markdown-ts-appear--managed-code-prefix-properties)
+        (add-to-list 'font-lock-extra-managed-props property))))
   (markdown-ts-appear--decoration-install-filter))
+
+(defun markdown-ts-appear--release-code-prefix-properties ()
+  "Stop managing code prefix properties added by appear mode."
+  (dolist (property markdown-ts-appear--managed-code-prefix-properties)
+    (setq font-lock-extra-managed-props
+          (delq property font-lock-extra-managed-props)))
+  (setq markdown-ts-appear--managed-code-prefix-properties nil))
 
 (defun markdown-ts-appear--remove-block-font-lock ()
   "Remove block rendering rules from the current buffer."
@@ -1096,8 +1116,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
     (setq treesit-font-lock-settings
           (seq-remove
            (lambda (setting)
-             (or (member setting markdown-ts-appear--quote-font-lock-settings)
-                 (member setting markdown-ts-appear--table-font-lock-settings)))
+              (or (member setting markdown-ts-appear--quote-font-lock-settings)
+                  (member setting markdown-ts-appear--code-font-lock-settings)
+                  (member setting markdown-ts-appear--table-font-lock-settings)))
            treesit-font-lock-settings))
     (setq markdown-ts-appear--block-font-lock-installed-p nil))
   (markdown-ts-appear--decoration-remove-filter))
@@ -1239,33 +1260,45 @@ The value has the same form as `markdown-ts-appear-link-icon'."
 
 (defun markdown-ts-appear--fontify-fence (node visible-p start limit)
   "Render fence NODE between START and LIMIT unless VISIBLE-P."
-  (when-let* (((not visible-p))
-              ((<= start (treesit-node-start node)))
-              ((<= (treesit-node-end node) limit))
-              (marker
-               (markdown-ts-appear--display-string
-                markdown-ts-appear-code-fence-marker)))
+  (when (and (not visible-p)
+             (eq markdown-ts-appear-code-fence-style 'connected)
+             (<= start (treesit-node-start node))
+             (<= (treesit-node-end node) limit))
     (if (markdown-ts-appear--fence-opening-p node)
         (let* ((block (treesit-node-parent node))
                (info
                 (markdown-ts-appear--first-direct-child-of-type
                  block "info_string"))
-               (gap-end (and info (treesit-node-start info))))
-          (markdown-ts-appear--decorate
-           (treesit-node-start node) (treesit-node-end node)
-           (concat marker (and info " "))
-           'markdown-ts-appear-code-fence-marker)
-          (when (and gap-end
-                     (<= gap-end limit)
-                     (< (treesit-node-end node) gap-end))
+               (header-end (if info (treesit-node-end info)
+                             (treesit-node-end node))))
+          (when (<= header-end limit)
             (markdown-ts-appear--decorate
-             (treesit-node-end node) gap-end "" nil)))
+             (treesit-node-start node) (treesit-node-end node)
+             (if info
+                 (format "╭─[ %s ]" (treesit-node-text info t))
+               "╭─")
+             'markdown-ts-appear-code-fence-marker)
+            (when (< (treesit-node-end node) header-end)
+              (markdown-ts-appear--decorate
+               (treesit-node-end node) header-end "" nil))))
       (markdown-ts-appear--decorate
        (treesit-node-start node) (treesit-node-end node)
-       (if markdown-ts-appear-code-fence-show-closing-marker
-           marker
-         "")
+       "╰─"
        'markdown-ts-appear-code-fence-marker))))
+
+(defun markdown-ts-appear--fontify-code-block
+    (node _override start limit &rest _)
+  "Render the content prefix of fenced code block NODE in START through LIMIT."
+  (when (and (markdown-ts-appear--active-p)
+             (eq markdown-ts-appear-code-fence-style 'connected))
+    (when-let* ((content
+                 (markdown-ts-appear--first-direct-child-of-type
+                  node "code_fence_content"))
+                (beg (max start (treesit-node-start content)))
+                (end (min limit (treesit-node-end content)))
+                ((< beg end)))
+      (markdown-ts-appear--decorate-line-prefix
+       beg end "│ " 'markdown-ts-appear-code-fence-marker))))
 
 (defun markdown-ts-appear--fontify-quote-marker (node visible-p start limit)
   "Render quote marker NODE between START and LIMIT unless VISIBLE-P."
@@ -1274,20 +1307,13 @@ The value has the same form as `markdown-ts-appear-link-icon'."
               ((< start (treesit-node-end node)))
               (marker
                (markdown-ts-appear--display-string
-                markdown-ts-appear-block-quote-open-marker)))
+                markdown-ts-appear-block-quote-marker)))
     (save-excursion
       (goto-char (max start (treesit-node-start node)))
       (while (search-forward ">" (min limit (treesit-node-end node)) t)
         (markdown-ts-appear--decorate
-         (1- (point)) (point) " "
-         'markdown-ts-appear-block-quote-marker)))
-    (when (equal (treesit-node-type node) "block_quote_marker")
-      (save-excursion
-        (goto-char (max start (treesit-node-start node)))
-        (when (search-forward ">" (min limit (treesit-node-end node)) t)
-          (markdown-ts-appear--decorate
-           (1- (point)) (point) marker
-           'markdown-ts-appear-block-quote-marker))))))
+         (1- (point)) (point) marker
+         'markdown-ts-appear-block-quote-marker)))))
 
 (defun markdown-ts-appear--fontify-delimiter
     (function node &rest arguments)
@@ -1342,10 +1368,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
           (end (treesit-node-end node))
           (marker
            (markdown-ts-appear--display-string
-            markdown-ts-appear-block-quote-open-marker))
-          (opening
-           (markdown-ts-appear--first-direct-child-of-type
-            node "block_quote_marker")))
+            markdown-ts-appear-block-quote-marker)))
       (when (< (max beg start) (min end limit))
         (add-face-text-property
          (max beg start) (min end limit)
@@ -1363,26 +1386,12 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                 (while (search-forward ">" (min line-end prefix-end) t)
                   (let ((marker-beg (1- (point))))
                     (when (and (<= start marker-beg)
-                               (< marker-beg limit)
                                (not (markdown-ts-appear--region-visible-p
                                      marker-beg (point))))
                       (markdown-ts-appear--decorate
-                       marker-beg (point) " "
+                       marker-beg (point) marker
                        'markdown-ts-appear-block-quote-marker)))))
-              (forward-line 1)))))
-      (when-let* ((marker marker)
-                  (opening-beg (and opening (treesit-node-start opening)))
-                  (opening-end (and opening (treesit-node-end opening)))
-                  ((<= start opening-beg))
-                  ((< opening-beg limit))
-                  ((not (markdown-ts-appear--region-visible-p
-                         opening-beg opening-end))))
-        (save-excursion
-          (goto-char opening-beg)
-          (when (search-forward ">" opening-end t)
-            (markdown-ts-appear--decorate
-             (1- (point)) (point) marker
-             'markdown-ts-appear-block-quote-marker)))))))
+              (forward-line 1))))))))
 
 (defun markdown-ts-appear--table-rows-in-range (table start limit)
   "Return row children of TABLE intersecting START through LIMIT."
@@ -1442,6 +1451,14 @@ The value has the same form as `markdown-ts-appear-link-icon'."
    '(((block_quote) @markdown-ts-appear--fontify-block-quote)))
   "Additional Tree-sitter font-lock settings for rendered block quotes.")
 
+(defconst markdown-ts-appear--code-font-lock-settings
+  (treesit-font-lock-rules
+   :language 'markdown
+   :feature 'paragraph
+   :override 'append
+   '(((fenced_code_block) @markdown-ts-appear--fontify-code-block)))
+  "Additional Tree-sitter font-lock settings for rendered code blocks.")
+
 (defconst markdown-ts-appear--table-font-lock-settings
   (treesit-font-lock-rules
    :language 'markdown
@@ -1500,12 +1517,16 @@ The value has the same form as `markdown-ts-appear-link-icon'."
           (let* ((description
                   (treesit-search-subtree parent "\\`image_description\\'"))
                  (url (treesit-node-text node t))
+                 (label (file-name-nondirectory url))
                  (icon (markdown-ts-appear--icon 'image)))
             (with-silent-modifications
               (when (not description)
                 (remove-text-properties
                  (treesit-node-start node) (treesit-node-end node)
-                 '(invisible nil)))
+                 '(invisible nil))
+                (markdown-ts-appear--decorate
+                 (treesit-node-start node) (treesit-node-end node)
+                 (if (equal label "") url label) nil))
               (markdown-ts--make-link-button beg end url))
             (when icon
               (let ((overlay
@@ -1758,6 +1779,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
             (delq 'markdown-ts-appear--decoration
                   (delq 'markdown-ts-appear--math-state
                         font-lock-extra-managed-props)))
+      (markdown-ts-appear--release-code-prefix-properties)
       (add-to-list 'font-lock-extra-managed-props 'display)
       (when markdown-ts-appear--managed-line-height-p
         (setq font-lock-extra-managed-props
@@ -1830,6 +1852,7 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
           (delq 'display
                 (delq 'markdown-ts-appear--decoration
                       font-lock-extra-managed-props)))
+    (markdown-ts-appear--release-code-prefix-properties)
     (markdown-ts-appear--install-view-rendering)))
 
 (defun markdown-ts-appear--buffer-teardown ()
@@ -1970,6 +1993,7 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
       (setq font-lock-extra-managed-props
             (delq 'markdown-ts-appear--decoration
                   font-lock-extra-managed-props)))
+    (markdown-ts-appear--release-code-prefix-properties)
     (markdown-ts-appear--release-indirect-clones)
     (setq markdown-ts-appear--setup-p nil)))
   (markdown-ts-appear--refresh-advice))
