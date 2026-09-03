@@ -23,6 +23,8 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'lisp-mnt)
+(require 'warnings)
 
 (declare-function mathjax-available-p "mathjax")
 (declare-function mathjax-render "mathjax")
@@ -31,14 +33,23 @@
              (file-name-directory
               (directory-file-name
                (file-name-directory (or load-file-name buffer-file-name)))))
+
+(defconst markdown-ts-appear-test--source-file
+  (expand-file-name
+   "markdown-ts-appear.el"
+   (file-name-directory
+    (directory-file-name
+     (file-name-directory (or load-file-name buffer-file-name)))))
+  "Package source file tested by this suite.")
+
 (require 'markdown-ts-appear)
 
 (when (and (getenv "MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS")
            (not (treesit-ready-p '(markdown markdown-inline))))
   (error "Required Markdown Tree-sitter grammars are unavailable"))
 
-(defvar markdown-ts-appear-test--use-nerd-icons t
-  "Whether buffer tests enable Nerd Icons integration.")
+(defvar markdown-ts-appear-test--decorations t
+  "Whether buffer tests enable rendered decorations.")
 
 (defmacro markdown-ts-appear-test--with-buffer (content &rest body)
   "Create a Markdown buffer containing CONTENT and evaluate BODY."
@@ -50,8 +61,18 @@
        (let ((treesit-font-lock-level 3)
              (markdown-ts-appear-enable-math-preview nil)
              (markdown-ts-appear-trigger 'always)
-             (markdown-ts-appear-use-nerd-icons
-              markdown-ts-appear-test--use-nerd-icons)
+             (markdown-ts-appear-link-icon
+              (and markdown-ts-appear-test--decorations "[link]"))
+             (markdown-ts-appear-image-icon
+              (and markdown-ts-appear-test--decorations "[image]"))
+             (markdown-ts-appear-wikilink-icon
+              (and markdown-ts-appear-test--decorations "◆"))
+             (markdown-ts-appear-code-fence-marker
+              (and markdown-ts-appear-test--decorations "▣"))
+             (markdown-ts-appear-block-quote-open-marker
+              (and markdown-ts-appear-test--decorations "❝"))
+             (markdown-ts-appear-table-style
+              (if markdown-ts-appear-test--decorations 'unicode 'raw))
              (markdown-ts-appear-center-display-math t)
              (markdown-ts-inline-images nil))
          (markdown-ts-mode)
@@ -77,6 +98,21 @@
   (or (text-property-not-all beg end 'invisible nil)
       (text-property-not-all beg end 'display nil)
       (text-property-any beg end 'line-height 0)))
+
+(ert-deftest markdown-ts-appear-test-mathjax-is-opt-in ()
+  (should-not (default-value 'markdown-ts-appear-enable-math-preview))
+  (should-not
+   (assq 'mathjax
+         (lm-package-requires markdown-ts-appear-test--source-file))))
+
+(ert-deftest markdown-ts-appear-test-visual-decorations-are-opt-in ()
+  (dolist (variable '(markdown-ts-appear-link-icon
+                      markdown-ts-appear-image-icon
+                      markdown-ts-appear-wikilink-icon
+                      markdown-ts-appear-code-fence-marker
+                      markdown-ts-appear-block-quote-open-marker))
+    (should-not (default-value variable)))
+  (should (eq (default-value 'markdown-ts-appear-table-style) 'raw)))
 
 (ert-deftest markdown-ts-appear-test-reveal-and-restore ()
   (markdown-ts-appear-test--with-buffer "**bold** plain\n"
@@ -294,7 +330,7 @@
 					  (should-not (equal (overlay-get icon 'before-string) "◆ ")))))
 
 (ert-deftest markdown-ts-appear-test-image-is-not-a-wikilink ()
-  (let ((markdown-ts-appear-test--use-nerd-icons nil))
+  (let ((markdown-ts-appear-test--decorations nil))
     (markdown-ts-appear-test--with-buffer "![[x]]\n"
 					  (goto-char 4)
 					  (should (equal (markdown-ts-appear--bounds)
@@ -506,6 +542,7 @@
   (with-temp-buffer
     (let ((markdown-ts-appear-enable-math-preview nil)
           (markdown-ts-appear-trigger 'always)
+          (markdown-ts-appear-link-icon "[link]")
           (markdown-ts-inline-images nil))
       (markdown-ts-mode)
       (unwind-protect
@@ -688,24 +725,45 @@
 (ert-deftest markdown-ts-appear-test-adopts-existing-indirect-clone ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
   (with-temp-buffer
-    (insert "**bold**\n")
+    (insert "**bold**\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")
     (let ((markdown-ts-appear-enable-math-preview nil)
+          (markdown-ts-appear-block-quote-open-marker "❝")
+          (markdown-ts-appear-table-style 'unicode)
           (clone nil))
       (markdown-ts-mode)
       (setq clone (clone-indirect-buffer " *markdown-existing-clone*" nil))
       (with-current-buffer clone
         (setq markdown-ts-hide-markup t)
+        (setq-local markdown-ts-appear-block-quote-open-marker nil)
+        (setq-local markdown-ts-appear-table-style 'raw)
         (add-to-list 'font-lock-extra-managed-props 'line-height))
       (unwind-protect
           (progn
             (markdown-ts-appear-mode 1)
             (should (memq clone markdown-ts-appear--indirect-clones))
-            (with-current-buffer clone
-              (should (eq markdown-ts-appear--base-owner
-                          (buffer-base-buffer)))
-              (font-lock-flush)
-              (font-lock-ensure)
-              (should (get-text-property (point-min) 'invisible)))
+            (font-lock-ensure)
+            (goto-char (point-min))
+            (search-forward "| A")
+            (let ((pipe-position (match-beginning 0)))
+              (should (equal (get-text-property pipe-position 'display) "│"))
+              (with-current-buffer clone
+                (should (eq markdown-ts-appear--base-owner
+                            (buffer-base-buffer)))
+                (should-not markdown-ts-appear--block-font-lock-installed-p)
+                (should markdown-ts-appear--decoration-filter-installed-p)
+                (should-not
+                 (memq 'markdown-ts-appear--decoration
+                       font-lock-extra-managed-props))
+                (font-lock-flush)
+                (font-lock-ensure)
+                (should (get-text-property (point-min) 'invisible))
+                (should (equal (get-text-property pipe-position 'display)
+                               "│"))
+                (goto-char (point-min))
+                (search-forward "1")
+                (replace-match "2" t t)
+                (beginning-of-line)
+                (should (equal (get-text-property (point) 'display) "│"))))
             (markdown-ts-appear-mode -1)
             (with-current-buffer clone
               (should markdown-ts-hide-markup)
@@ -878,32 +936,147 @@
 					  (should (stringp (overlay-get overlay 'before-string)))
 					  (should (equal (overlay-get overlay 'help-echo) "images/demo.gif")))))
 
-(ert-deftest markdown-ts-appear-test-keeps-quote-markers-visible ()
-  (markdown-ts-appear-test--with-buffer "   > quote\n> > nested\n"
+(ert-deftest markdown-ts-appear-test-renders-and-reveals-block-quote ()
+  (markdown-ts-appear-test--with-buffer "> quote\n> continued\n"
 					(goto-char (point-min))
-					(search-forward ">")
-					(should-not (get-text-property (1- (point)) 'invisible))
-					(search-forward ">")
-					(should-not (get-text-property (1- (point)) 'invisible))
-					(search-forward ">")
-					(should-not (get-text-property (1- (point)) 'invisible))))
+					(should (equal (get-text-property 1 'display) "❝"))
+					(should (equal (get-text-property 9 'display) " "))
+					(markdown-ts-appear--update)
+					(should-not (get-text-property 1 'display))
+					(goto-char (point-max))
+					(markdown-ts-appear--update)
+					(should (equal (get-text-property 1 'display) "❝"))))
 
-(ert-deftest markdown-ts-appear-test-keeps-code-fences-visible ()
+(ert-deftest markdown-ts-appear-test-renders-nested-quote-markers ()
+  (markdown-ts-appear-test--with-buffer "> outer\n> > nested\n> outer again\n"
+					(should (equal (get-text-property 1 'display) "❝"))
+					(should (equal (get-text-property 9 'display) " "))
+					(should (equal (get-text-property 11 'display) "❝"))))
+
+(ert-deftest markdown-ts-appear-test-reveals-compact-quote-marker-boundary ()
+  (markdown-ts-appear-test--with-buffer ">quote\n"
+                                        (goto-char 2)
+                                        (markdown-ts-appear--update)
+                                        (should-not
+                                         (get-text-property 1 'display))))
+
+(ert-deftest markdown-ts-appear-test-renders-and-reveals-code-fences ()
+  (dolist (content '("```emacs-lisp\n(message \"hi\")\n```\n"
+		     "~~~ emacs-lisp\n(message \"hi\")\n~~~\n"))
+    (markdown-ts-appear-test--with-buffer content
+					  (goto-char (point-min))
+					  (should (equal (get-text-property 1 'display) "▣ "))
+					  (search-forward "emacs-lisp")
+					  (should-not (get-text-property (1- (point)) 'invisible))
+					  (markdown-ts-appear--update)
+					  (should-not (get-text-property 1 'display))
+					  (goto-char (point-max))
+					  (markdown-ts-appear--update)
+					  (goto-char (point-min))
+					  (forward-line 1)
+					  (search-forward
+					   (if (eq (char-after (point-min)) ?`) "```" "~~~"))
+					  (let ((closing-beg (match-beginning 0)))
+					    (should (equal (get-text-property
+							    closing-beg 'display)
+							   ""))
+					    (markdown-ts-appear--update)
+					    (should-not
+					     (get-text-property closing-beg 'display)))
+					  (goto-char (point-min))
+					  (markdown-ts-appear--update)
+					  (should-not (get-text-property 1 'display))
+					  (goto-char (point-max))
+					  (markdown-ts-appear--update)
+					  (should (equal (get-text-property 1 'display) "▣ ")))))
+
+(ert-deftest markdown-ts-appear-test-renders-unicode-table ()
   (markdown-ts-appear-test--with-buffer
-   "```emacs-lisp\n(message \"hi\")\n```\n"
+   "| Element | Status |\n|:--------|-------:|\n| Heading | Ready  |\n"
+   (should (equal (get-text-property 1 'display) "│"))
    (goto-char (point-min))
-   (should-not (get-text-property (point) 'invisible))
-   (search-forward "emacs-lisp")
-   (should-not (get-text-property (1- (point)) 'invisible))
-   (search-forward "```")
-   (should-not (get-text-property (match-beginning 0) 'invisible))))
+   (search-forward "|:--------")
+   (should (equal (get-text-property (match-beginning 0) 'display) "┼"))
+   (should (equal (get-text-property (1+ (match-beginning 0)) 'display) "─"))
+   (goto-char (point-min))
+   (search-forward "Element")
+   (markdown-ts-appear--update)
+   (should-not (get-text-property (point-min) 'display))))
+
+(ert-deftest markdown-ts-appear-test-renders-table-without-edge-pipes ()
+  (markdown-ts-appear-test--with-buffer
+   "Element | Status\n--------|-------\nHeading | Ready\n"
+   (goto-char (point-min))
+   (search-forward "|")
+   (should (equal (get-text-property (1- (point)) 'display) "│"))
+   (search-forward "|")
+   (should (equal (get-text-property (1- (point)) 'display) "┼"))))
+
+(ert-deftest markdown-ts-appear-test-preserves-table-indentation ()
+  (markdown-ts-appear-test--with-buffer
+   "  | A | B |\n  |---|---|\n  | 1 | 2 |\n"
+   (goto-char (point-min))
+   (forward-line 1)
+   (should-not (get-text-property (point) 'display))
+   (should-not (get-text-property (1+ (point)) 'display))
+   (search-forward "|")
+   (should (equal (get-text-property (1- (point)) 'display) "┼"))))
+
+(ert-deftest markdown-ts-appear-test-block-fontifiers-respect-region ()
+  (markdown-ts-appear-test--with-buffer
+   "> first\n> second\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+   (let* ((quote (markdown-ts-appear--node-ancestor
+                  (treesit-node-at (point-min) 'markdown) "block_quote"))
+          (table-pos (save-excursion
+                       (goto-char (point-min))
+                       (search-forward "| A")
+                       (match-beginning 0)))
+          (table (markdown-ts-appear--node-ancestor
+                  (treesit-node-at table-pos 'markdown) "pipe_table"))
+          (second-quote-marker (save-excursion
+                                 (goto-char (point-min))
+                                 (forward-line 1)
+                                 (point))))
+     (remove-text-properties
+      (point-min) (point-max)
+      '(display nil markdown-ts-appear--decoration nil))
+     (markdown-ts-appear--fontify-block-quote
+      quote 'append second-quote-marker (1+ second-quote-marker))
+     (should-not (get-text-property (point-min) 'display))
+     (should (equal (get-text-property second-quote-marker 'display) " "))
+     (put-text-property (point-min) (1+ (point-min)) 'display 'foreign)
+     (markdown-ts-appear--fontify-quote-marker
+      (markdown-ts-appear--first-direct-child-of-type
+       quote "block_quote_marker")
+      nil second-quote-marker (1+ second-quote-marker))
+     (should (eq (get-text-property (point-min) 'display) 'foreign))
+     (remove-text-properties
+      (point-min) (point-max)
+      '(display nil markdown-ts-appear--decoration nil))
+     (markdown-ts-appear--fontify-table
+      table 'append table-pos (1+ table-pos))
+     (should (equal (get-text-property table-pos 'display) "│"))
+     (should-not
+      (get-text-property
+       (save-excursion
+         (goto-char table-pos)
+         (search-forward "|")
+         (search-forward "|")
+         (1- (point)))
+       'display)))))
 
 (ert-deftest markdown-ts-appear-test-can-disable-decorations ()
-  (let ((markdown-ts-appear-test--use-nerd-icons nil))
+  (let ((markdown-ts-appear-test--decorations nil))
     (markdown-ts-appear-test--with-buffer
      "> quote\n\n[link](https://example.com)\n\n```c\nint x;\n```\n"
      (goto-char (point-min))
      (should-not (get-text-property (point) 'invisible))
+     (should-not (get-text-property (point) 'display))
+     (search-forward "```")
+     (search-forward "```")
+     (should-not (get-text-property (match-beginning 0) 'display))
+     (should-not markdown-ts-appear--block-font-lock-installed-p)
+     (should markdown-ts-appear--decoration-filter-installed-p)
      (should-not
       (seq-some
        (lambda (overlay)
@@ -911,7 +1084,7 @@
        (overlays-in (point-min) (point-max)))))))
 
 (ert-deftest markdown-ts-appear-test-empty-image-without-icon ()
-  (let ((markdown-ts-appear-test--use-nerd-icons nil))
+  (let ((markdown-ts-appear-test--decorations nil))
     (markdown-ts-appear-test--with-buffer "![](images/demo.gif)\n"
 					  (goto-char (point-min))
 					  (let ((beg (search-forward "images/demo.gif")))
@@ -975,6 +1148,71 @@
       (should-not markdown-ts-hide-markup)
       (should-not markdown-ts-appear--advice-installed-p))))
 
+(ert-deftest markdown-ts-appear-test-unavailable-mathjax-keeps-main-mode-active ()
+  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
+  (dolist (failure '(missing broken))
+    (with-temp-buffer
+      (insert "$x$\n")
+      (markdown-ts-mode)
+      (let ((markdown-ts-appear-enable-math-preview t)
+            (original-require (symbol-function 'require))
+            warning)
+        (unwind-protect
+            (cl-letf (((symbol-function 'require)
+                       (lambda (feature &optional filename noerror)
+                         (if (not (eq feature 'mathjax))
+                             (funcall original-require feature filename noerror)
+                           (when (eq failure 'broken)
+                             (error "Broken MathJax package")))))
+                      ((symbol-function 'display-warning)
+                       (lambda (_type message &rest _arguments)
+                         (setq warning message))))
+              (markdown-ts-appear-mode 1)
+              (should markdown-ts-appear-mode)
+              (should markdown-ts-appear--setup-p)
+              (should-not markdown-ts-appear--math-preview-active-p)
+              (should-not
+               (memq #'markdown-ts-appear--math-preview-window
+                     window-buffer-change-functions))
+              (should (string-match-p "unavailable" warning)))
+          (when markdown-ts-appear--setup-p
+            (markdown-ts-appear-mode -1)))))))
+
+(ert-deftest markdown-ts-appear-test-deferred-math-failure-rolls-back ()
+  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
+  (with-temp-buffer
+    (insert "$x$\n")
+    (markdown-ts-mode)
+    (let ((markdown-ts-appear-enable-math-preview nil)
+          warning)
+      (unwind-protect
+          (progn
+            (markdown-ts-appear-mode 1)
+            (cl-letf (((symbol-function 'display-graphic-p)
+                       (lambda (&optional _display) t))
+                      ((symbol-function 'image-type-available-p)
+                       (lambda (_type) t))
+                      ((symbol-function 'require)
+                       (lambda (feature &optional _filename _noerror)
+                         (eq feature 'mathjax)))
+                      ((symbol-function 'mathjax-available-p)
+                       (lambda () t))
+                      ((symbol-function
+                        'markdown-ts-appear--math-install-clone-filters)
+                       (lambda () (error "Deferred setup failed")))
+                      ((symbol-function 'display-warning)
+                       (lambda (_type message &rest _arguments)
+                         (setq warning message))))
+              (should-not (markdown-ts-appear--math-enable))
+              (should-not markdown-ts-appear--math-preview-active-p)
+              (should-not markdown-ts-appear--math-filter-installed-p)
+              (should-not
+               (memq 'markdown-ts-appear--math-state
+                     font-lock-extra-managed-props))
+              (should (string-match-p "Deferred setup failed" warning))))
+        (when markdown-ts-appear--setup-p
+          (markdown-ts-appear-mode -1))))))
+
 (ert-deftest markdown-ts-appear-test-math-cache-key-includes-scale ()
   (let ((markdown-ts-appear-math-scale 1.1))
     (should (equal (markdown-ts-appear--math-key "x" nil)
@@ -984,7 +1222,8 @@
                    '(t 1.25 "x")))))
 
 (ert-deftest markdown-ts-appear-test-mathjax-render-smoke ()
-  (if (getenv "MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX")
+  (if (member (getenv "MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX")
+              '("1" "true"))
       (progn
         (should (require 'mathjax nil t))
         (should (mathjax-available-p)))
@@ -1048,6 +1287,47 @@
     (markdown-ts-appear--math-filter-copied-text text)
     (should-not (get-text-property 0 'display text))
     (should (eq (get-text-property 1 'display text) 'other-package))))
+
+(ert-deftest markdown-ts-appear-test-decoration-copy-filter-preserves-other-display ()
+  (let ((text (propertize "ab" 'display 'other-package)))
+    (put-text-property 0 1 'markdown-ts-appear--decoration t text)
+    (markdown-ts-appear--decoration-filter-copied-text text)
+    (should-not (get-text-property 0 'display text))
+    (should-not (get-text-property 0 'markdown-ts-appear--decoration text))
+    (should (eq (get-text-property 1 'display text) 'other-package))))
+
+(ert-deftest markdown-ts-appear-test-copy-removes-rendered-decorations ()
+  (let ((source "> quote\n\n```c\nint x;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"))
+    (markdown-ts-appear-test--with-buffer source
+					  (let ((copy (filter-buffer-substring (point-min) (point-max))))
+					    (should (equal copy source))
+					    (should-not
+					     (text-property-not-all 0 (length copy) 'display nil copy))
+					    (should-not
+					     (text-property-not-all
+					      0 (length copy) 'markdown-ts-appear--decoration nil copy))))))
+
+(ert-deftest markdown-ts-appear-test-resolves-icon-fallback ()
+  (cl-letf (((symbol-function 'char-displayable-p)
+             (lambda (_character) nil)))
+    (should (equal (markdown-ts-appear--display-string '("preferred" . "fallback"))
+                   "fallback")))
+  (should-not (markdown-ts-appear--display-string nil)))
+
+(ert-deftest markdown-ts-appear-test-disable-cleans-block-rendering ()
+  (markdown-ts-appear-test--with-buffer
+   "> quote\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+   (should markdown-ts-appear--block-font-lock-installed-p)
+   (should markdown-ts-appear--decoration-filter-installed-p)
+   (should (text-property-not-all
+            (point-min) (point-max) 'markdown-ts-appear--decoration nil))
+   (markdown-ts-appear-mode -1)
+   (font-lock-ensure)
+   (should-not markdown-ts-appear--block-font-lock-installed-p)
+   (should-not markdown-ts-appear--decoration-filter-installed-p)
+   (should-not (text-property-not-all
+                (point-min) (point-max)
+                'markdown-ts-appear--decoration nil))))
 
 (ert-deftest markdown-ts-appear-test-math-cleanup-preserves-other-display ()
   (with-temp-buffer
@@ -1252,10 +1532,14 @@
             (should-not markdown-ts-appear-mode)
             (should-not markdown-ts-appear--math-preview-active-p)
             (should-not markdown-ts-appear--setup-p)
-            (should-not markdown-ts-appear--math-filter-installed-p))
+            (should-not markdown-ts-appear--math-filter-installed-p)
+            (should-not markdown-ts-appear--block-font-lock-installed-p)
+            (should-not markdown-ts-appear--decoration-filter-installed-p))
           (with-current-buffer clone
             (should-not markdown-ts-appear--base-owner)
-            (should-not markdown-ts-appear--math-filter-installed-p))
+            (should-not markdown-ts-appear--math-filter-installed-p)
+            (should-not markdown-ts-appear--block-font-lock-installed-p)
+            (should-not markdown-ts-appear--decoration-filter-installed-p))
           (should-not (marker-position pending-marker))
           (should (zerop (hash-table-count markdown-ts-appear--math-cache)))
           (should (zerop (hash-table-count markdown-ts-appear--math-pending)))

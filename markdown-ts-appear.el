@@ -6,7 +6,7 @@
 ;; Assisted-by: OpenCode:gpt-5.6-sol
 ;; Maintainer: Thysrael <thysrael@163.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "31.1") (mathjax "0.1"))
+;; Package-Requires: ((emacs "31.1"))
 ;; Keywords: text, convenience
 ;; URL: https://github.com/Thysrael/markdown-ts-appear
 
@@ -43,7 +43,6 @@
 
 (declare-function mathjax-available-p "mathjax")
 (declare-function mathjax-render "mathjax")
-(declare-function nerd-icons-octicon "nerd-icons")
 
 (defvar evil-insert-state-entry-hook)
 (defvar evil-insert-state-exit-hook)
@@ -68,8 +67,10 @@ an optional dependency."
                  (const :tag "Only in Evil insert state" evil-insert))
   :group 'markdown-ts-appear)
 
-(defcustom markdown-ts-appear-enable-math-preview t
-  "Whether `markdown-ts-appear-mode' should preview LaTeX with MathJax."
+(defcustom markdown-ts-appear-enable-math-preview nil
+  "Whether `markdown-ts-appear-mode' should preview LaTeX with MathJax.
+The optional `mathjax' package must be installed separately when this is
+non-nil."
   :type 'boolean
   :group 'markdown-ts-appear)
 
@@ -92,11 +93,85 @@ This scales the SVG's intrinsic dimensions without replacing Emacs' automatic
   :set #'markdown-ts-appear--set-positive-number
   :group 'markdown-ts-appear)
 
-(defcustom markdown-ts-appear-use-nerd-icons t
-  "Whether to use Nerd Icons for rendered links and images when available.
-When this is nil, links receive no prefix icon.  Image destinations without
-alt text remain visible."
+(defcustom markdown-ts-appear-link-icon nil
+  "Icon displayed before rendered Markdown links.
+The value may be a string, a cons of preferred and fallback strings, or nil."
+  :type '(choice (const :tag "No icon" nil)
+                 (string :tag "Icon")
+                 (cons :tag "Preferred and fallback"
+                       (string :tag "Preferred")
+                       (string :tag "Fallback")))
+  :group 'markdown-ts-appear)
+
+(defcustom markdown-ts-appear-image-icon nil
+  "Icon displayed before rendered Markdown images.
+The value has the same form as `markdown-ts-appear-link-icon'."
+  :type '(choice (const :tag "No icon" nil)
+                 (string :tag "Icon")
+                 (cons :tag "Preferred and fallback"
+                       (string :tag "Preferred")
+                       (string :tag "Fallback")))
+  :group 'markdown-ts-appear)
+
+(defcustom markdown-ts-appear-wikilink-icon nil
+  "Icon displayed before rendered Markdown Wiki links.
+The value has the same form as `markdown-ts-appear-link-icon'."
+  :type '(choice (const :tag "No icon" nil)
+                 (string :tag "Icon")
+                 (cons :tag "Preferred and fallback"
+                       (string :tag "Preferred")
+                       (string :tag "Fallback")))
+  :group 'markdown-ts-appear)
+
+(defcustom markdown-ts-appear-code-fence-marker nil
+  "Marker replacing an opening fenced code block delimiter.
+The value has the same form as `markdown-ts-appear-link-icon'."
+  :type '(choice (const :tag "Display raw delimiter" nil)
+                 (string :tag "Marker")
+                 (cons :tag "Preferred and fallback"
+                       (string :tag "Preferred")
+                       (string :tag "Fallback")))
+  :group 'markdown-ts-appear)
+
+(defcustom markdown-ts-appear-code-fence-show-closing-marker nil
+  "Whether to display the configured marker for closing code fences."
   :type 'boolean
+  :group 'markdown-ts-appear)
+
+(defcustom markdown-ts-appear-block-quote-open-marker nil
+  "Marker replacing the first marker of a rendered block quote.
+The value has the same form as `markdown-ts-appear-link-icon'."
+  :type '(choice (const :tag "Display raw marker" nil)
+                 (string :tag "Marker")
+                 (cons :tag "Preferred and fallback"
+                       (string :tag "Preferred")
+                       (string :tag "Fallback")))
+  :group 'markdown-ts-appear)
+
+(defcustom markdown-ts-appear-table-style 'raw
+  "How rendered Markdown pipe tables should display their delimiters."
+  :type '(choice (const :tag "Raw Markdown" raw)
+                 (const :tag "Unicode delimiters" unicode))
+  :group 'markdown-ts-appear)
+
+(defface markdown-ts-appear-code-fence-marker
+  '((t :inherit markdown-ts-language-keyword))
+  "Face used for rendered fenced code block markers."
+  :group 'markdown-ts-appear)
+
+(defface markdown-ts-appear-block-quote
+  '((t :inherit markdown-ts-block-quote))
+  "Face used for rendered block quotes."
+  :group 'markdown-ts-appear)
+
+(defface markdown-ts-appear-block-quote-marker
+  '((t :inherit font-lock-comment-face))
+  "Face used for rendered block quote markers."
+  :group 'markdown-ts-appear)
+
+(defface markdown-ts-appear-table-border
+  '((t :inherit markdown-ts-table-delimiter-cell))
+  "Face used for rendered table borders."
   :group 'markdown-ts-appear)
 
 (defvar-local markdown-ts-appear-mode nil
@@ -141,20 +216,20 @@ alt text remain visible."
 (defvar-local markdown-ts-appear--math-filter-installed-p nil
   "Non-nil when the math preview copy filter is installed.")
 
+(defvar-local markdown-ts-appear--decoration-filter-installed-p nil
+  "Non-nil when the decoration copy filter is installed.")
+
+(defvar-local markdown-ts-appear--block-font-lock-installed-p nil
+  "Non-nil when block rendering font-lock rules are installed.")
+
 (defvar-local markdown-ts-appear--indirect-clones nil
   "Live indirect buffers sharing this buffer's appear rendering.")
 
 (defvar markdown-ts-appear--tearing-down-buffer-p nil
   "Non-nil while cleanup is running for a buffer being discarded.")
 
-(defvar markdown-ts-appear--image-icon nil
-  "Cached icon used before rendered Markdown images.")
-
-(defvar markdown-ts-appear--link-icon nil
-  "Cached icon used before rendered Markdown links.")
-
-(defvar markdown-ts-appear--wikilink-icon nil
-  "Cached icon used before rendered Markdown Wiki links.")
+(defvar markdown-ts-appear--quote-font-lock-settings)
+(defvar markdown-ts-appear--table-font-lock-settings)
 
 (defvar markdown-ts-appear--math-cache (make-hash-table :test #'equal)
   "MathJax results keyed by formula text and display style.")
@@ -206,6 +281,49 @@ alt text remain visible."
                      . ,markdown-ts-appear-math-scale)))
     (unless (and (numberp (cdr option)) (> (cdr option) 0))
       (user-error "%s must be a positive number" (car option)))))
+
+(defun markdown-ts-appear--display-string (value)
+  "Resolve customizable display VALUE to a usable string."
+  (cond
+   ((stringp value) value)
+   ((and (consp value) (stringp (car value)) (stringp (cdr value)))
+    (if (and (> (length (car value)) 0)
+             (seq-every-p #'char-displayable-p
+                          (string-to-list (car value))))
+        (car value)
+      (cdr value)))))
+
+(defun markdown-ts-appear--decorate (beg end string face)
+  "Display STRING with FACE instead of text between BEG and END."
+  (let ((display (copy-sequence string)))
+    (when face
+      (add-face-text-property 0 (length display) face t display))
+    (with-silent-modifications
+      (put-text-property beg end 'display display)
+      (put-text-property beg end 'markdown-ts-appear--decoration t))))
+
+(defun markdown-ts-appear--node-ancestor (node type)
+  "Return NODE or its nearest ancestor whose type is TYPE."
+  (while (and node (not (equal (treesit-node-type node) type)))
+    (setq node (treesit-node-parent node)))
+  node)
+
+(defun markdown-ts-appear--direct-children-of-type (node type)
+  "Return direct children of NODE whose type is TYPE."
+  (let (children)
+    (dotimes (index (treesit-node-child-count node))
+      (let ((child (treesit-node-child node index)))
+        (when (equal (treesit-node-type child) type)
+          (push child children))))
+    (nreverse children)))
+
+(defun markdown-ts-appear--first-direct-child-of-type (node type)
+  "Return the first direct child of NODE whose type is TYPE."
+  (catch 'child
+    (dotimes (index (treesit-node-child-count node))
+      (let ((child (treesit-node-child node index)))
+        (when (equal (treesit-node-type child) type)
+          (throw 'child child))))))
 
 (defun markdown-ts-appear--visible-region ()
   "Return the reveal region governing the current buffer's text."
@@ -411,11 +529,63 @@ alt text remain visible."
              (cons (treesit-node-start structural-node)
                    (treesit-node-end structural-node)))))))))
 
+(defun markdown-ts-appear--markdown-node-at (position)
+  "Return the Markdown node at POSITION, including at node boundaries."
+  (or (treesit-node-at position 'markdown)
+      (and (> position (point-min))
+           (treesit-node-at (1- position) 'markdown))))
+
+(defun markdown-ts-appear--fence-bounds-at (position)
+  "Return fenced code block delimiter bounds at POSITION."
+  (when-let* ((block (markdown-ts-appear--node-ancestor
+                      (markdown-ts-appear--markdown-node-at position)
+                      "fenced_code_block"))
+              (delimiters
+               (markdown-ts-appear--direct-children-of-type
+                block "fenced_code_block_delimiter")))
+    (let* ((opening (car delimiters))
+           (closing (car (last delimiters)))
+           (info (markdown-ts-appear--first-direct-child-of-type
+                  block "info_string"))
+           (opening-end (if info (treesit-node-end info)
+                          (treesit-node-end opening))))
+      (cond
+       ((and (<= (treesit-node-start opening) position)
+             (<= position opening-end))
+        (cons (treesit-node-start opening) opening-end))
+       ((and closing
+             (<= (treesit-node-start closing) position)
+             (<= position (treesit-node-end closing)))
+        (cons (treesit-node-start closing) (treesit-node-end closing)))))))
+
+(defun markdown-ts-appear--quote-marker-bounds-at (position)
+  "Return block quote marker bounds at POSITION."
+  (let ((nodes (delq nil
+                     (list (treesit-node-at position 'markdown)
+                           (and (> position (point-min))
+                                (treesit-node-at
+                                 (1- position) 'markdown)))))
+        marker)
+    (while (and nodes (not marker))
+      (let ((node (pop nodes)))
+        (while (and node (not marker))
+          (when (and (member (treesit-node-type node)
+                             '("block_quote_marker" "block_continuation"))
+                     (<= (treesit-node-start node) position)
+                     (<= position (treesit-node-end node))
+                     (string-search ">" (treesit-node-text node t)))
+            (setq marker node))
+          (setq node (treesit-node-parent node)))))
+    (when marker
+      (cons (treesit-node-start marker) (treesit-node-end marker)))))
+
 (defun markdown-ts-appear--bounds ()
   "Return source bounds for the smallest rendered element at point."
   (let ((pos (point)))
-    (unless (markdown-ts-appear--literal-block-at pos)
-      (markdown-ts-appear--bounds-at-point pos))))
+    (or (markdown-ts-appear--fence-bounds-at pos)
+        (markdown-ts-appear--quote-marker-bounds-at pos)
+        (unless (markdown-ts-appear--literal-block-at pos)
+          (markdown-ts-appear--bounds-at-point pos)))))
 
 (defun markdown-ts-appear--update-inline-ranges ()
   "Update inline Tree-sitter ranges around point when needed."
@@ -876,6 +1046,85 @@ alt text remain visible."
         (setq pos next))))
   text)
 
+(defun markdown-ts-appear--decoration-filter-copied-text (text)
+  "Remove package decoration properties from copied Markdown TEXT."
+  (let ((pos 0)
+        (end (length text)))
+    (while (< pos end)
+      (let ((next (next-single-property-change
+                   pos 'markdown-ts-appear--decoration text end)))
+        (when (get-text-property pos 'markdown-ts-appear--decoration text)
+          (remove-text-properties
+           pos next '(display nil markdown-ts-appear--decoration nil) text))
+        (setq pos next))))
+  text)
+
+(defun markdown-ts-appear--decoration-install-filter ()
+  "Install the decoration copy filter in the current buffer."
+  (unless markdown-ts-appear--decoration-filter-installed-p
+    (add-function :filter-return (local 'filter-buffer-substring-function)
+                  #'markdown-ts-appear--decoration-filter-copied-text)
+    (setq markdown-ts-appear--decoration-filter-installed-p t)))
+
+(defun markdown-ts-appear--decoration-remove-filter ()
+  "Remove the decoration copy filter from the current buffer."
+  (when markdown-ts-appear--decoration-filter-installed-p
+    (remove-function (local 'filter-buffer-substring-function)
+                     #'markdown-ts-appear--decoration-filter-copied-text)
+    (setq markdown-ts-appear--decoration-filter-installed-p nil)))
+
+(defun markdown-ts-appear--install-block-font-lock ()
+  "Install block rendering rules in the current buffer."
+  (unless markdown-ts-appear--block-font-lock-installed-p
+    (let ((settings
+           (append
+            (and markdown-ts-appear-block-quote-open-marker
+                 markdown-ts-appear--quote-font-lock-settings)
+            (and (eq markdown-ts-appear-table-style 'unicode)
+                 markdown-ts-appear--table-font-lock-settings))))
+      (when settings
+        (setq treesit-font-lock-settings
+              (append treesit-font-lock-settings settings))
+        (setq markdown-ts-appear--block-font-lock-installed-p t))))
+  (add-to-list 'font-lock-extra-managed-props
+               'markdown-ts-appear--decoration)
+  (markdown-ts-appear--decoration-install-filter))
+
+(defun markdown-ts-appear--remove-block-font-lock ()
+  "Remove block rendering rules from the current buffer."
+  (when markdown-ts-appear--block-font-lock-installed-p
+    (setq treesit-font-lock-settings
+          (seq-remove
+           (lambda (setting)
+             (or (member setting markdown-ts-appear--quote-font-lock-settings)
+                 (member setting markdown-ts-appear--table-font-lock-settings)))
+           treesit-font-lock-settings))
+    (setq markdown-ts-appear--block-font-lock-installed-p nil))
+  (markdown-ts-appear--decoration-remove-filter))
+
+(defun markdown-ts-appear--install-view-rendering ()
+  "Install view-local rendering integration in the current buffer."
+  (if (buffer-live-p markdown-ts-appear--base-owner)
+      (markdown-ts-appear--decoration-install-filter)
+    (markdown-ts-appear--install-block-font-lock)))
+
+(defun markdown-ts-appear--remove-view-rendering ()
+  "Remove view-local rendering integration from the current buffer."
+  (markdown-ts-appear--remove-block-font-lock)
+  (markdown-ts-appear--delete-rendering-overlays))
+
+(defun markdown-ts-appear--install-all-view-rendering ()
+  "Install rendering integration in the base and indirect views."
+  (dolist (buffer (markdown-ts-appear--view-buffers))
+    (with-current-buffer buffer
+      (markdown-ts-appear--install-view-rendering))))
+
+(defun markdown-ts-appear--remove-all-view-rendering ()
+  "Remove rendering integration from the base and indirect views."
+  (dolist (buffer (markdown-ts-appear--view-buffers))
+    (with-current-buffer buffer
+      (markdown-ts-appear--remove-view-rendering))))
+
 (defun markdown-ts-appear--math-outline-view-change ()
   "Refresh math previews after the outline visibility changes."
   (when markdown-ts-appear--math-preview-active-p
@@ -923,24 +1172,33 @@ alt text remain visible."
 (defun markdown-ts-appear--math-enable ()
   "Enable MathJax rendering when its runtime dependencies are available."
   (markdown-ts-appear--validate-math-options)
-  (when (and (or (display-graphic-p)
-                 (markdown-ts-appear--math-graphic-window))
-             (image-type-available-p 'svg)
-             (require 'mathjax nil t)
-             (mathjax-available-p))
-    (markdown-ts-appear--install-advice)
-    (setq markdown-ts-appear--math-preview-active-p t)
-    (remove-hook 'window-buffer-change-functions
-                 #'markdown-ts-appear--math-preview-window t)
-    (markdown-ts-appear--math-install-filter)
-    (markdown-ts-appear--math-install-clone-filters)
-    (with-suppressed-warnings ((obsolete outline-view-change-hook))
-      (add-hook 'outline-view-change-hook
-                #'markdown-ts-appear--math-outline-view-change nil t))
-    (add-to-list 'font-lock-extra-managed-props
-                 'markdown-ts-appear--math-state)
-    (font-lock-flush)
-    t))
+  (condition-case error-data
+      (when (and (or (display-graphic-p)
+                     (markdown-ts-appear--math-graphic-window))
+                 (image-type-available-p 'svg)
+                 (require 'mathjax nil t)
+                 (mathjax-available-p))
+        (markdown-ts-appear--install-advice)
+        (setq markdown-ts-appear--math-preview-active-p t)
+        (remove-hook 'window-buffer-change-functions
+                     #'markdown-ts-appear--math-preview-window t)
+        (markdown-ts-appear--math-install-filter)
+        (markdown-ts-appear--math-install-clone-filters)
+        (with-suppressed-warnings ((obsolete outline-view-change-hook))
+          (add-hook 'outline-view-change-hook
+                    #'markdown-ts-appear--math-outline-view-change nil t))
+        (add-to-list 'font-lock-extra-managed-props
+                     'markdown-ts-appear--math-state)
+        (font-lock-flush)
+        t)
+    (error
+     (markdown-ts-appear--math-teardown)
+     (display-warning
+      'markdown-ts-appear
+      (format "Math preview unavailable: %s"
+              (error-message-string error-data))
+      :warning)
+     nil)))
 
 (defun markdown-ts-appear--math-teardown ()
   "Disable MathJax rendering and remove its buffer-local integration."
@@ -970,13 +1228,77 @@ alt text remain visible."
                 (not (markdown-ts-appear--node-visible-p node)))))
       (apply function node arguments))))
 
+(defun markdown-ts-appear--fence-opening-p (node)
+  "Return non-nil when fenced delimiter NODE opens its code block."
+  (when-let* ((block (markdown-ts-appear--node-ancestor
+                      (treesit-node-parent node) "fenced_code_block"))
+              (opening
+               (markdown-ts-appear--first-direct-child-of-type
+                block "fenced_code_block_delimiter")))
+    (= (treesit-node-start node) (treesit-node-start opening))))
+
+(defun markdown-ts-appear--fontify-fence (node visible-p start limit)
+  "Render fence NODE between START and LIMIT unless VISIBLE-P."
+  (when-let* (((not visible-p))
+              ((<= start (treesit-node-start node)))
+              ((<= (treesit-node-end node) limit))
+              (marker
+               (markdown-ts-appear--display-string
+                markdown-ts-appear-code-fence-marker)))
+    (if (markdown-ts-appear--fence-opening-p node)
+        (let* ((block (treesit-node-parent node))
+               (info
+                (markdown-ts-appear--first-direct-child-of-type
+                 block "info_string"))
+               (gap-end (and info (treesit-node-start info))))
+          (markdown-ts-appear--decorate
+           (treesit-node-start node) (treesit-node-end node)
+           (concat marker (and info " "))
+           'markdown-ts-appear-code-fence-marker)
+          (when (and gap-end
+                     (<= gap-end limit)
+                     (< (treesit-node-end node) gap-end))
+            (markdown-ts-appear--decorate
+             (treesit-node-end node) gap-end "" nil)))
+      (markdown-ts-appear--decorate
+       (treesit-node-start node) (treesit-node-end node)
+       (if markdown-ts-appear-code-fence-show-closing-marker
+           marker
+         "")
+       'markdown-ts-appear-code-fence-marker))))
+
+(defun markdown-ts-appear--fontify-quote-marker (node visible-p start limit)
+  "Render quote marker NODE between START and LIMIT unless VISIBLE-P."
+  (when-let* (((not visible-p))
+              ((< (treesit-node-start node) limit))
+              ((< start (treesit-node-end node)))
+              (marker
+               (markdown-ts-appear--display-string
+                markdown-ts-appear-block-quote-open-marker)))
+    (save-excursion
+      (goto-char (max start (treesit-node-start node)))
+      (while (search-forward ">" (min limit (treesit-node-end node)) t)
+        (markdown-ts-appear--decorate
+         (1- (point)) (point) " "
+         'markdown-ts-appear-block-quote-marker)))
+    (when (equal (treesit-node-type node) "block_quote_marker")
+      (save-excursion
+        (goto-char (max start (treesit-node-start node)))
+        (when (search-forward ">" (min limit (treesit-node-end node)) t)
+          (markdown-ts-appear--decorate
+           (1- (point)) (point) marker
+           'markdown-ts-appear-block-quote-marker))))))
+
 (defun markdown-ts-appear--fontify-delimiter
     (function node &rest arguments)
-  "Call FUNCTION with NODE and ARGUMENTS, preserving structural delimiters."
+  "Call FUNCTION with NODE and ARGUMENTS, rendering structural delimiters."
   (if (not (markdown-ts-appear--active-p))
       (apply function node arguments)
     (let* ((type (treesit-node-type node))
            (hide-markup-p markdown-ts-hide-markup)
+           (visible-p (markdown-ts-appear--node-visible-p node))
+           (start (nth 1 arguments))
+           (limit (nth 2 arguments))
            (quote-marker-p
             (and (member type '("block_quote_marker" "block_continuation"))
                  (save-excursion
@@ -988,7 +1310,7 @@ alt text remain visible."
            (markdown-ts-hide-markup
             (and markdown-ts-hide-markup
                  (not (or quote-marker-p fence-p
-                          (markdown-ts-appear--node-visible-p node))))))
+                          visible-p)))))
       (apply function node arguments)
       (when (equal type "fenced_code_block_delimiter")
         (let ((face (if hide-markup-p
@@ -996,10 +1318,137 @@ alt text remain visible."
                       'markdown-ts-code-block)))
           (save-excursion
             (goto-char (treesit-node-start node))
-            (add-face-text-property
-             (line-beginning-position)
-             (min (point-max) (1+ (line-end-position)))
-             face t)))))))
+            (let ((beg (max start (line-beginning-position)))
+                  (end (min limit (point-max) (1+ (line-end-position)))))
+              (when (< beg end)
+                (add-face-text-property beg end face t)))))
+        (markdown-ts-appear--fontify-fence node visible-p start limit))
+      (when quote-marker-p
+        (markdown-ts-appear--fontify-quote-marker
+         node visible-p start limit)))))
+
+(defun markdown-ts-appear--quote-prefix-end ()
+  "Return the end of the block quote prefix on the current line."
+  (save-excursion
+    (back-to-indentation)
+    (when (looking-at "\\(?:>[ \\t]?\\)+")
+      (match-end 0))))
+
+(defun markdown-ts-appear--fontify-block-quote
+    (node _override start limit &rest _)
+  "Render block quote NODE between START and LIMIT."
+  (when (markdown-ts-appear--active-p)
+    (let ((beg (treesit-node-start node))
+          (end (treesit-node-end node))
+          (marker
+           (markdown-ts-appear--display-string
+            markdown-ts-appear-block-quote-open-marker))
+          (opening
+           (markdown-ts-appear--first-direct-child-of-type
+            node "block_quote_marker")))
+      (when (< (max beg start) (min end limit))
+        (add-face-text-property
+         (max beg start) (min end limit)
+         'markdown-ts-appear-block-quote t))
+      (when marker
+        (save-excursion
+          (goto-char (max beg start))
+          (beginning-of-line)
+          (when (< (point) beg)
+            (goto-char beg))
+          (while (< (point) (min end limit))
+            (let ((line-end (min end limit (line-end-position)))
+                  (prefix-end (markdown-ts-appear--quote-prefix-end)))
+              (when prefix-end
+                (while (search-forward ">" (min line-end prefix-end) t)
+                  (let ((marker-beg (1- (point))))
+                    (when (and (<= start marker-beg)
+                               (< marker-beg limit)
+                               (not (markdown-ts-appear--region-visible-p
+                                     marker-beg (point))))
+                      (markdown-ts-appear--decorate
+                       marker-beg (point) " "
+                       'markdown-ts-appear-block-quote-marker)))))
+              (forward-line 1)))))
+      (when-let* ((marker marker)
+                  (opening-beg (and opening (treesit-node-start opening)))
+                  (opening-end (and opening (treesit-node-end opening)))
+                  ((<= start opening-beg))
+                  ((< opening-beg limit))
+                  ((not (markdown-ts-appear--region-visible-p
+                         opening-beg opening-end))))
+        (save-excursion
+          (goto-char opening-beg)
+          (when (search-forward ">" opening-end t)
+            (markdown-ts-appear--decorate
+             (1- (point)) (point) marker
+             'markdown-ts-appear-block-quote-marker)))))))
+
+(defun markdown-ts-appear--table-rows-in-range (table start limit)
+  "Return row children of TABLE intersecting START through LIMIT."
+  (let ((child
+         (treesit-node-first-child-for-pos
+          table (max start (treesit-node-start table))))
+        rows)
+    (while (and child (< (treesit-node-start child) limit))
+      (when (member (treesit-node-type child)
+                    '("pipe_table_header" "pipe_table_delimiter_row"
+                      "pipe_table_row"))
+        (push child rows))
+      (setq child (treesit-node-next-sibling child)))
+    (nreverse rows)))
+
+(defun markdown-ts-appear--table-pipes (row)
+  "Return direct pipe children of ROW."
+  (markdown-ts-appear--direct-children-of-type row "|"))
+
+(defun markdown-ts-appear--fontify-table-row (row start limit)
+  "Render delimiter characters in table ROW between START and LIMIT."
+  (unless (markdown-ts-appear--node-visible-p row)
+    (if (equal (treesit-node-type row) "pipe_table_delimiter_row")
+        (let* ((row-end (treesit-node-end row))
+               (content-start
+                (save-excursion
+                  (goto-char (treesit-node-start row))
+                  (skip-chars-forward " \t" row-end)
+                  (point)))
+               (pos (max start content-start))
+               (end (min limit row-end)))
+          (while (< pos end)
+            (markdown-ts-appear--decorate
+             pos (1+ pos) (if (eq (char-after pos) ?|) "┼" "─")
+             'markdown-ts-appear-table-border)
+            (setq pos (1+ pos))))
+      (dolist (pipe (markdown-ts-appear--table-pipes row))
+        (when (and (<= start (treesit-node-start pipe))
+                   (< (treesit-node-start pipe) limit))
+          (markdown-ts-appear--decorate
+           (treesit-node-start pipe) (treesit-node-end pipe) "│"
+           'markdown-ts-appear-table-border))))))
+
+(defun markdown-ts-appear--fontify-table
+    (node _override start limit &rest _)
+  "Render Markdown pipe table NODE between START and LIMIT."
+  (when (and (markdown-ts-appear--active-p)
+             (eq markdown-ts-appear-table-style 'unicode))
+    (dolist (row (markdown-ts-appear--table-rows-in-range node start limit))
+      (markdown-ts-appear--fontify-table-row row start limit))))
+
+(defconst markdown-ts-appear--quote-font-lock-settings
+  (treesit-font-lock-rules
+   :language 'markdown
+   :feature 'paragraph
+   :override 'append
+   '(((block_quote) @markdown-ts-appear--fontify-block-quote)))
+  "Additional Tree-sitter font-lock settings for rendered block quotes.")
+
+(defconst markdown-ts-appear--table-font-lock-settings
+  (treesit-font-lock-rules
+   :language 'markdown
+   :feature 'paragraph
+   :override 'append
+   '(((pipe_table) @markdown-ts-appear--fontify-table)))
+  "Additional Tree-sitter font-lock settings for rendered tables.")
 
 (defun markdown-ts-appear--fontify-visible-markup
     (function node &rest arguments)
@@ -1020,24 +1469,14 @@ alt text remain visible."
       (apply function node arguments))))
 
 (defun markdown-ts-appear--icon (type)
-  "Return the cached Markdown icon for TYPE."
-  (when markdown-ts-appear-use-nerd-icons
-    (let* ((variable (pcase type
-                       ('image 'markdown-ts-appear--image-icon)
-                       ('wikilink 'markdown-ts-appear--wikilink-icon)
-                       (_ 'markdown-ts-appear--link-icon)))
-           (cached (symbol-value variable)))
-      (or cached
-          (set variable
-               (cond
-                ((eq type 'wikilink)
-                 (propertize "◆" 'face 'markdown-ts-link))
-                ((require 'nerd-icons nil t)
-                 (nerd-icons-octicon
-                  (if (eq type 'image) "nf-oct-image" "nf-oct-link")
-                  :face 'markdown-ts-link))
-                ((eq type 'image) "[image]")
-                (t "[link]")))))))
+  "Return the configured Markdown icon for TYPE."
+  (when-let* ((icon
+               (markdown-ts-appear--display-string
+                (pcase type
+                  ('image markdown-ts-appear-image-icon)
+                  ('wikilink markdown-ts-appear-wikilink-icon)
+                  (_ markdown-ts-appear-link-icon)))))
+    (propertize icon 'face 'markdown-ts-link)))
 
 (defun markdown-ts-appear--fontify-link-destination
     (function node &rest arguments)
@@ -1218,7 +1657,7 @@ alt text remain visible."
             (markdown-ts-appear--detach-indirect-clone t)))))))
 
 (defun markdown-ts-appear--after-change (beg end _old-length)
-  "Remove stale rendering overlays from lines touched between BEG and END."
+  "Refresh rendering on lines changed between BEG and END."
   (let ((owner (if (buffer-live-p markdown-ts-appear--base-owner)
                    markdown-ts-appear--base-owner
                  (current-buffer))))
@@ -1229,15 +1668,21 @@ alt text remain visible."
           (save-restriction
             (widen)
             (goto-char beg)
-            (markdown-ts-appear--update-inline-ranges))))))
-  (save-excursion
-    (let ((overlay-beg (progn (goto-char beg) (line-beginning-position)))
-          (overlay-end
-           (progn
-             (goto-char end)
-             (min (point-max) (1+ (line-end-position))))))
-      (markdown-ts-appear--delete-shared-rendering-overlays
-       overlay-beg overlay-end))))
+            (markdown-ts-appear--update-inline-ranges)))))
+    (save-excursion
+      (let ((line-beg (progn (goto-char beg) (line-beginning-position)))
+            (line-end
+             (progn
+               (goto-char end)
+               (min (point-max) (1+ (line-end-position))))))
+        (markdown-ts-appear--delete-shared-rendering-overlays
+         line-beg line-end)
+        (unless (eq owner (current-buffer))
+          (with-current-buffer owner
+            (save-restriction
+              (widen)
+              (font-lock-flush line-beg line-end)
+              (font-lock-ensure line-beg line-end))))))))
 
 (defun markdown-ts-appear--parser-changed (ranges _parser)
   "Remove stale rendering overlays in Tree-sitter changed RANGES."
@@ -1280,8 +1725,8 @@ alt text remain visible."
   (remove-hook 'window-buffer-change-functions
                #'markdown-ts-appear--math-preview-owner-window t)
   (remove-hook 'after-change-functions #'markdown-ts-appear--after-change t)
+  (markdown-ts-appear--remove-view-rendering)
   (markdown-ts-appear--math-remove-filter)
-  (markdown-ts-appear--delete-rendering-overlays)
   (markdown-ts-appear--forget-indirect-clone)
   (setq markdown-ts-appear--base-owner nil))
 
@@ -1307,11 +1752,13 @@ alt text remain visible."
                    #'markdown-ts-appear--math-preview-owner-window t)
       (remove-hook 'after-change-functions
                    #'markdown-ts-appear--after-change t)
+      (markdown-ts-appear--remove-view-rendering)
       (markdown-ts-appear--math-remove-filter)
-      (markdown-ts-appear--delete-rendering-overlays)
       (setq font-lock-extra-managed-props
-            (delq 'markdown-ts-appear--math-state
-                  font-lock-extra-managed-props))
+            (delq 'markdown-ts-appear--decoration
+                  (delq 'markdown-ts-appear--math-state
+                        font-lock-extra-managed-props)))
+      (add-to-list 'font-lock-extra-managed-props 'display)
       (when markdown-ts-appear--managed-line-height-p
         (setq font-lock-extra-managed-props
               (delq 'line-height font-lock-extra-managed-props))
@@ -1320,7 +1767,8 @@ alt text remain visible."
   (setq markdown-ts-appear--indirect-clones nil))
 
 (defun markdown-ts-appear--detach-indirect-clone (&optional existing-p)
-  "Detach inherited integration from a newly created indirect clone."
+  "Detach inherited integration from an indirect clone.
+When EXISTING-P is non-nil, preserve its prior Markdown display settings."
   (when-let* ((base (buffer-base-buffer)))
     (when existing-p
       (setq markdown-ts-appear--previous-hide-markup markdown-ts-hide-markup)
@@ -1342,7 +1790,7 @@ alt text remain visible."
     (setq markdown-ts-appear--indirect-clones nil)
     (setq post-command-hook
           (remove #'markdown-ts-appear--update post-command-hook))
-    (add-hook 'after-change-functions #'markdown-ts-appear--after-change nil t)
+    (add-hook 'after-change-functions #'markdown-ts-appear--after-change t t)
     (setq change-major-mode-hook
           (remove #'markdown-ts-appear--buffer-teardown
                   change-major-mode-hook))
@@ -1374,7 +1822,15 @@ alt text remain visible."
           (remove #'markdown-ts-appear--detach-indirect-clone
                   clone-indirect-buffer-hook))
     (setq local-minor-modes
-          (remove 'markdown-ts-appear-mode local-minor-modes))))
+          (remove 'markdown-ts-appear-mode local-minor-modes))
+    (markdown-ts-appear--remove-block-font-lock)
+    ;; The clone shares rendered text properties but has no parser to restore
+    ;; them.
+    (setq font-lock-extra-managed-props
+          (delq 'display
+                (delq 'markdown-ts-appear--decoration
+                      font-lock-extra-managed-props)))
+    (markdown-ts-appear--install-view-rendering)))
 
 (defun markdown-ts-appear--buffer-teardown ()
   "Disable Markdown TS Appear before replacing the current major mode."
@@ -1448,6 +1904,7 @@ alt text remain visible."
     (setq markdown-ts-appear--previous-hide-markup markdown-ts-hide-markup)
     (setq markdown-ts-appear--setup-p t)
     (markdown-ts-appear--adopt-existing-indirect-clones)
+    (markdown-ts-appear--install-all-view-rendering)
     (unless (memq 'line-height font-lock-extra-managed-props)
       (setq markdown-ts-appear--managed-line-height-p t)
       (add-to-list 'font-lock-extra-managed-props 'line-height))
@@ -1455,7 +1912,7 @@ alt text remain visible."
       (setq markdown-ts-hide-markup t)
       (markdown-ts--set-hide-markup t))
     (markdown-ts-appear--sync-indirect-clone-markup t)
-    (add-hook 'after-change-functions #'markdown-ts-appear--after-change nil t)
+    (add-hook 'after-change-functions #'markdown-ts-appear--after-change t t)
     (add-hook 'change-major-mode-hook
               #'markdown-ts-appear--buffer-teardown nil t)
     (add-hook 'kill-buffer-hook
@@ -1469,11 +1926,19 @@ alt text remain visible."
     (markdown-ts-appear--install-parser-notifiers)
     (when markdown-ts-appear-enable-math-preview
       (condition-case error-data
-          (markdown-ts-appear--math-setup)
+          (if (require 'mathjax nil t)
+              (markdown-ts-appear--math-setup)
+            (display-warning
+             'markdown-ts-appear
+             "Math preview enabled, but optional package `mathjax' is unavailable"
+             :warning))
         (error
          (markdown-ts-appear--math-teardown)
-         (message "Markdown math preview unavailable: %s"
-                  (error-message-string error-data))))))
+         (display-warning
+          'markdown-ts-appear
+          (format "Math preview unavailable: %s"
+                  (error-message-string error-data))
+          :warning)))))
    ((and (not markdown-ts-appear-mode) markdown-ts-appear--setup-p)
     (remove-hook 'after-change-functions #'markdown-ts-appear--after-change t)
     (remove-hook 'change-major-mode-hook
@@ -1484,6 +1949,7 @@ alt text remain visible."
                  #'markdown-ts-appear--detach-indirect-clone t)
     (markdown-ts-appear--remove-parser-notifiers)
     (markdown-ts-appear--disable-trigger)
+    (markdown-ts-appear--remove-all-view-rendering)
     (markdown-ts-appear--math-teardown)
     (save-restriction
       (widen)
@@ -1500,7 +1966,10 @@ alt text remain visible."
       (when markdown-ts-appear--managed-line-height-p
         (setq font-lock-extra-managed-props
               (delq 'line-height font-lock-extra-managed-props))
-        (setq markdown-ts-appear--managed-line-height-p nil)))
+        (setq markdown-ts-appear--managed-line-height-p nil))
+      (setq font-lock-extra-managed-props
+            (delq 'markdown-ts-appear--decoration
+                  font-lock-extra-managed-props)))
     (markdown-ts-appear--release-indirect-clones)
     (setq markdown-ts-appear--setup-p nil)))
   (markdown-ts-appear--refresh-advice))

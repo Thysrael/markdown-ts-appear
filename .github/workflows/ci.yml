@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   test:
-    name: Emacs ${{ matrix.emacs-version }} / grammar ${{ matrix.grammar-version }}
+    name: Emacs ${{ matrix.emacs-version }} / grammar ${{ matrix.grammar-version }} / MathJax ${{ matrix.mathjax }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -21,15 +21,19 @@ jobs:
           - emacs-version: "31.1"
             grammar-version: pinned
             grammar-commit: "413285231ce8fa8b11e7074bbe265b48aa7277f9"
+            mathjax: true
           - emacs-version: "31.1"
             grammar-version: latest
             grammar-commit: ""
+            mathjax: false
           - emacs-version: snapshot
             grammar-version: pinned
             grammar-commit: "413285231ce8fa8b11e7074bbe265b48aa7277f9"
+            mathjax: false
           - emacs-version: snapshot
             grammar-version: latest
             grammar-commit: ""
+            mathjax: false
 
     steps:
       - uses: actions/checkout@v5
@@ -68,7 +72,8 @@ jobs:
             (unless (treesit-ready-p '(markdown markdown-inline c))
               (error \"Required Tree-sitter grammars are unavailable\"))))"
 
-      - name: Install package dependencies
+      - name: Install optional MathJax dependency
+        if: matrix.mathjax
         run: |
           emacs --batch -Q --eval "(progn
             (require 'package)
@@ -99,7 +104,7 @@ jobs:
       - name: Run tests
         env:
           MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS: "1"
-          MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX: "1"
+          MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX: ${{ matrix.mathjax }}
         run: |
           emacs --batch -Q -L . \
             --eval '(progn (require (quote package)) (package-initialize))' \
