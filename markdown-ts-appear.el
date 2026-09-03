@@ -242,6 +242,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
 (defvar markdown-ts-appear--tearing-down-buffer-p nil
   "Non-nil while cleanup is running for a buffer being discarded.")
 
+(defvar markdown-ts-appear--refreshing-clone-edit-p nil
+  "Non-nil while an indirect clone edit refreshes its owner buffer.")
+
 (defvar markdown-ts-appear--quote-font-lock-settings)
 (defvar markdown-ts-appear--code-font-lock-settings)
 (defvar markdown-ts-appear--table-font-lock-settings)
@@ -1904,8 +1907,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
           (with-current-buffer owner
             (save-restriction
               (widen)
-              (font-lock-flush line-beg line-end)
-              (font-lock-ensure line-beg line-end))))))))
+              (let ((markdown-ts-appear--refreshing-clone-edit-p t))
+                (font-lock-flush line-beg line-end)
+                (font-lock-ensure line-beg line-end)))))))))
 
 (defun markdown-ts-appear--parser-changed (ranges _parser)
   "Invalidate rendering in Tree-sitter changed RANGES."
@@ -1919,8 +1923,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
           (let ((beg (max (point-min) (1- (car range))))
                 (end (min (point-max) (1+ (cdr range)))))
             (markdown-ts-appear--delete-shared-rendering-overlays beg end)
-            (font-lock-unfontify-region beg end)
-            (font-lock-flush beg end)))))))
+            (when markdown-ts-appear--refreshing-clone-edit-p
+              (font-lock-unfontify-region beg end)
+              (font-lock-flush beg end))))))))
 
 (defun markdown-ts-appear--install-parser-notifiers ()
   "Install package change notifiers on the Markdown parsers."

@@ -602,6 +602,13 @@
        (overlay-get overlay 'markdown-ts-appear--link-icon))
      (overlays-in (point-min) (point-max))))))
 
+(ert-deftest markdown-ts-appear-test-parser-change-preserves-fontification ()
+  (markdown-ts-appear-test--with-buffer "**bold**plain\n"
+    (should (get-text-property (point-min) 'invisible))
+    (markdown-ts-appear--parser-changed
+     (list (cons (point-min) (point-max))) nil)
+    (should (get-text-property (point-min) 'invisible))))
+
 (ert-deftest markdown-ts-appear-test-notifies-inline-parser-created-after-setup ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
   (with-temp-buffer
