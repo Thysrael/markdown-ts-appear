@@ -146,7 +146,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   :group 'markdown-ts-appear)
 
 (defface markdown-ts-appear-code-fence-marker
-  '((t :inherit markdown-ts-language-keyword))
+  '((t :inherit (markdown-ts-language-keyword markdown-ts-code-block)))
   "Face used for rendered fenced code block markers."
   :group 'markdown-ts-appear)
 

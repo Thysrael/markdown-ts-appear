@@ -114,6 +114,12 @@
   (should (eq (default-value 'markdown-ts-appear-code-fence-style) 'raw))
   (should (eq (default-value 'markdown-ts-appear-table-style) 'raw)))
 
+(ert-deftest markdown-ts-appear-test-code-fence-face-inherits-block-background ()
+  (should
+   (memq 'markdown-ts-code-block
+         (face-attribute 'markdown-ts-appear-code-fence-marker
+                         :inherit nil))))
+
 (ert-deftest markdown-ts-appear-test-reveal-and-restore ()
   (markdown-ts-appear-test--with-buffer "**bold** plain\n"
 					(goto-char 3)
