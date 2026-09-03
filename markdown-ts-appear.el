@@ -5,7 +5,7 @@
 ;; Author: Thysrael <thysrael@163.com>
 ;; Assisted-by: OpenCode:gpt-5.6-sol
 ;; Maintainer: Thysrael <thysrael@163.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "31.1"))
 ;; Keywords: text, convenience
 ;; URL: https://github.com/Thysrael/markdown-ts-appear
