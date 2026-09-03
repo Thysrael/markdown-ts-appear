@@ -131,9 +131,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
 
 (defcustom markdown-ts-appear-label-caps nil
   "Left and right strings surrounding rendered labels.
-When nil, code languages use brackets and callouts retain their source
-brackets.  Powerline users can set this to a cons such as (\"\" . \"\")."
-  :type '(choice (const :tag "Use brackets" nil)
+When nil, labels contain only their text with surrounding padding.
+Powerline users can set this to a cons such as (\"\" . \"\")."
+  :type '(choice (const :tag "No caps" nil)
                   (cons :tag "Left and right caps"
                         (string :tag "Left cap")
                         (string :tag "Right cap")))
@@ -326,15 +326,15 @@ The value has the same form as `markdown-ts-appear-link-icon'."
        beg end `(line-prefix ,display wrap-prefix ,display
                  markdown-ts-appear--decoration t)))))
 
-(defun markdown-ts-appear--label (text bracketed face)
-  "Render TEXT or BRACKETED as an inverse-video label over FACE."
+(defun markdown-ts-appear--label (text face)
+  "Render TEXT as a padded inverse-video label over FACE."
   (let ((label-face (list 'markdown-ts-appear-label face)))
     (if-let* ((caps markdown-ts-appear-label-caps))
         (concat
          (propertize (car caps) 'face face)
          (propertize (concat " " text " ") 'face label-face)
          (propertize (cdr caps) 'face face))
-      (propertize bracketed 'face label-face))))
+      (propertize (concat " " text " ") 'face label-face))))
 
 (defun markdown-ts-appear--code-quote-prefix (source)
   "Render quoted code prefix SOURCE followed by a code block marker."
@@ -1358,8 +1358,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                            (propertize
                             "╭─" 'face 'markdown-ts-appear-code-fence-marker)
                           (markdown-ts-appear--label
-                           language (format "[ %s ]" language)
-                           'markdown-ts-appear-code-fence-marker)))
+                           language 'markdown-ts-appear-code-fence-marker)))
                      "╭─")))
               (markdown-ts-appear--decorate
                (treesit-node-start node) (treesit-node-end node)
@@ -1470,9 +1469,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
       (markdown-ts-appear--decorate
        beg label-end
        (markdown-ts-appear--label
-        (nth 2 data)
-        (buffer-substring-no-properties beg label-end)
-        'markdown-ts-appear-block-quote-marker)
+        (nth 2 data) 'markdown-ts-appear-block-quote-marker)
        nil))))
 
 (defun markdown-ts-appear--fontify-quote-marker (node visible-p start limit)

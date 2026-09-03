@@ -136,6 +136,15 @@
         (should (eq (get-text-property 6 'face display)
                     'markdown-ts-appear-code-fence-marker))))))
 
+(ert-deftest markdown-ts-appear-test-renders-plain-language-label-by-default ()
+  (let ((markdown-ts-appear-label-caps nil))
+    (markdown-ts-appear-test--with-buffer "```c\nint x;\n```\n"
+      (let ((display (get-text-property (point-min) 'display)))
+        (should (equal display "╭─ c "))
+        (should
+         (memq 'markdown-ts-appear-label
+               (get-text-property 3 'face display)))))))
+
 (ert-deftest markdown-ts-appear-test-renders-callout-label ()
   (let ((markdown-ts-appear-label-caps '("" . ""))
         (markdown-ts-appear-render-callouts t))
@@ -1016,7 +1025,7 @@
     (markdown-ts-appear-test--with-buffer content
 					  (goto-char (point-min))
 					  (should (equal (get-text-property 1 'display)
-							 "╭─[ emacs-lisp ]"))
+							 "╭─ emacs-lisp "))
 					  (search-forward "emacs-lisp")
 					  (should (equal (get-text-property (1- (point)) 'display) ""))
 					  (forward-line 1)
@@ -1044,7 +1053,7 @@
 					  (goto-char (point-max))
 					  (markdown-ts-appear--update)
 					  (should (equal (get-text-property 1 'display)
-							 "╭─[ emacs-lisp ]")))))
+							 "╭─ emacs-lisp ")))))
 
 (ert-deftest markdown-ts-appear-test-code-prefix-respects-region ()
   (markdown-ts-appear-test--with-buffer

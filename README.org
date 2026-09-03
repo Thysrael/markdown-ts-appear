@@ -113,11 +113,11 @@ Evil is optional.  To reveal source only while editing:
   ~markdown-ts-appear-wikilink-icon~ control link prefix icons and default to
   nil.
 - ~markdown-ts-appear-code-fence-style~ is either ~raw~ or ~connected~ and
-  defaults to ~raw~.  The connected style displays ~╭─[ language ]~, prefixes
+  defaults to ~raw~.  The connected style displays ~╭─ language~, prefixes
   code lines with ~│~, and displays ~╰─~ for the closing fence.
-- ~markdown-ts-appear-label-caps~ optionally replaces label brackets with left
-  and right strings such as ~("" . "")~.  Label text uses inverse video while
-  the caps use its background color as their foreground, forming one shape.
+- ~markdown-ts-appear-label-caps~ optionally surrounds label text with left and
+  right strings such as ~("" . "")~.  Label text uses inverse video while the
+  caps use its background color as their foreground, forming one shape.
 - ~markdown-ts-appear-render-callouts~ recognizes callout markers such as
   ~[!WARNING]-~ at the start of block quotes.  Callout and code-language labels
   use inverse video, but callout folding is not implemented.
