@@ -93,12 +93,21 @@ installing ~mathjax~ or changing this option.
 To render image files themselves, also enable the built-in
 ~markdown-ts-inline-images~ option or run ~markdown-ts-toggle-inline-images~.
 
-* Evil
+* Modal Editors
 
-Evil is optional.  To reveal source only while editing:
+Evil and Meow are optional.  To reveal source only while editing, select the
+corresponding insert-state trigger:
+
+For Evil:
 
 #+begin_src emacs-lisp
 (setq markdown-ts-appear-trigger 'evil-insert)
+#+end_src
+
+For Meow:
+
+#+begin_src emacs-lisp
+(setq markdown-ts-appear-trigger 'meow-insert)
 #+end_src
 
 * Options

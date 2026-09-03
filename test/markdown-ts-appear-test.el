@@ -427,6 +427,8 @@
 					(markdown-ts-appear-mode 1)
 					(markdown-ts-appear-mode -1)
 					(should-not markdown-ts-hide-markup)
+					(should-not
+					 (local-variable-p 'markdown-ts-hide-markup))
 					(markdown-ts-appear-mode -1)
 					(should-not markdown-ts-hide-markup)))
 
@@ -449,7 +451,88 @@
     (markdown-ts--set-hide-markup t)
     (markdown-ts-appear-mode 1)
     (markdown-ts-appear-mode -1)
-    (should markdown-ts-hide-markup)))
+    (should markdown-ts-hide-markup)
+    (should (local-variable-p 'markdown-ts-hide-markup))))
+
+(ert-deftest markdown-ts-appear-test-restores-clone-hide-markup-locality ()
+  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
+  (with-temp-buffer
+    (insert "**bold**\n")
+    (let ((markdown-ts-appear-enable-math-preview nil)
+          clone)
+      (markdown-ts-mode)
+      (should-not (local-variable-p 'markdown-ts-hide-markup))
+      (setq clone (clone-indirect-buffer " *markdown-locality-clone*" nil))
+      (unwind-protect
+          (progn
+            (with-current-buffer clone
+              (should-not (local-variable-p 'markdown-ts-hide-markup)))
+            (markdown-ts-appear-mode 1)
+            (should (local-variable-p 'markdown-ts-hide-markup))
+            (with-current-buffer clone
+              (should (local-variable-p 'markdown-ts-hide-markup)))
+            (markdown-ts-appear-mode -1)
+            (should-not (local-variable-p 'markdown-ts-hide-markup))
+            (with-current-buffer clone
+              (should-not (local-variable-p 'markdown-ts-hide-markup))))
+        (when markdown-ts-appear--setup-p
+          (markdown-ts-appear-mode -1))
+        (when (buffer-live-p clone)
+          (kill-buffer clone))))))
+
+(ert-deftest markdown-ts-appear-test-meow-trigger-follows-insert-hooks ()
+  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
+  (with-temp-buffer
+    (insert "A *word* here\n")
+    (markdown-ts-mode)
+    (setq-local markdown-ts-appear-trigger 'meow-insert)
+    (setq-local markdown-ts-appear-enable-math-preview nil)
+    (setq-local meow-insert-enter-hook nil)
+    (setq-local meow-insert-exit-hook nil)
+    (setq-local meow-insert-mode nil)
+    (unwind-protect
+        (progn
+          (markdown-ts-appear-mode 1)
+          (goto-char 5)
+          (should-not
+           (memq #'markdown-ts-appear--update post-command-hook))
+          (should
+           (memq #'markdown-ts-appear--start meow-insert-enter-hook))
+          (should
+           (memq #'markdown-ts-appear--stop meow-insert-exit-hook))
+          (run-hooks 'meow-insert-enter-hook)
+          (should (memq #'markdown-ts-appear--update post-command-hook))
+          (should markdown-ts-appear--region)
+          (run-hooks 'meow-insert-exit-hook)
+          (should-not
+           (memq #'markdown-ts-appear--update post-command-hook))
+          (should-not markdown-ts-appear--region)
+          (markdown-ts-appear-mode -1)
+          (should-not
+           (memq #'markdown-ts-appear--start meow-insert-enter-hook))
+          (should-not
+           (memq #'markdown-ts-appear--stop meow-insert-exit-hook)))
+      (when markdown-ts-appear--setup-p
+        (markdown-ts-appear-mode -1)))))
+
+(ert-deftest markdown-ts-appear-test-meow-trigger-starts-in-insert-state ()
+  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
+  (with-temp-buffer
+    (insert "A *word* here\n")
+    (markdown-ts-mode)
+    (setq-local markdown-ts-appear-trigger 'meow-insert)
+    (setq-local markdown-ts-appear-enable-math-preview nil)
+    (setq-local meow-insert-enter-hook nil)
+    (setq-local meow-insert-exit-hook nil)
+    (setq-local meow-insert-mode t)
+    (unwind-protect
+        (progn
+          (goto-char 5)
+          (markdown-ts-appear-mode 1)
+          (should (memq #'markdown-ts-appear--update post-command-hook))
+          (should markdown-ts-appear--region))
+      (when markdown-ts-appear--setup-p
+        (markdown-ts-appear-mode -1)))))
 
 (ert-deftest markdown-ts-appear-test-restores-setext-line-height ()
   (markdown-ts-appear-test--with-buffer "Title\n=====\n"
@@ -839,6 +922,7 @@
             (markdown-ts-appear-mode -1)
             (with-current-buffer clone
               (should markdown-ts-hide-markup)
+              (should (local-variable-p 'markdown-ts-hide-markup))
               (should (memq 'line-height font-lock-extra-managed-props))))
         (when markdown-ts-appear--setup-p
           (markdown-ts-appear-mode -1))

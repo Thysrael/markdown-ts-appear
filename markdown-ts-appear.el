@@ -47,6 +47,9 @@
 (defvar evil-insert-state-entry-hook)
 (defvar evil-insert-state-exit-hook)
 (defvar evil-state)
+(defvar meow-insert-enter-hook)
+(defvar meow-insert-exit-hook)
+(defvar meow-insert-mode)
 
 (defgroup markdown-ts-appear nil
   "Reveal rendered Markdown source at point."
@@ -61,10 +64,11 @@
 (defcustom markdown-ts-appear-trigger 'always
   "When `markdown-ts-appear-mode' should reveal source.
 With `always', track point whenever the mode is enabled.  With
-`evil-insert', track point only while Evil is in insert state; Evil remains
-an optional dependency."
+`evil-insert' or `meow-insert', track point only while the corresponding
+modal editor is in insert state; both editors remain optional dependencies."
   :type '(choice (const :tag "Whenever the mode is enabled" always)
-                 (const :tag "Only in Evil insert state" evil-insert))
+                 (const :tag "Only in Evil insert state" evil-insert)
+                 (const :tag "Only in Meow insert state" meow-insert))
   :group 'markdown-ts-appear)
 
 (defcustom markdown-ts-appear-enable-math-preview nil
@@ -209,6 +213,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
 (defvar-local markdown-ts-appear--previous-hide-markup nil
   "Value of `markdown-ts-hide-markup' before appear mode was enabled.")
 
+(defvar-local markdown-ts-appear--previous-hide-markup-local-p nil
+  "Whether `markdown-ts-hide-markup' was buffer-local before appear mode.")
+
 (defvar-local markdown-ts-appear--setup-p nil
   "Non-nil when Markdown TS Appear buffer integration is active.")
 
@@ -290,6 +297,20 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   "Set local mode variable SYMBOL to nil and unregister it."
   (set symbol nil)
   (setq local-minor-modes (delq symbol local-minor-modes)))
+
+(defun markdown-ts-appear--save-hide-markup ()
+  "Save the current value and locality of `markdown-ts-hide-markup'."
+  (setq markdown-ts-appear--previous-hide-markup markdown-ts-hide-markup)
+  (setq markdown-ts-appear--previous-hide-markup-local-p
+        (local-variable-p 'markdown-ts-hide-markup)))
+
+(defun markdown-ts-appear--restore-hide-markup ()
+  "Restore the saved value and locality of `markdown-ts-hide-markup'."
+  (if markdown-ts-appear--previous-hide-markup-local-p
+      (setq markdown-ts-hide-markup
+            markdown-ts-appear--previous-hide-markup)
+    (kill-local-variable 'markdown-ts-hide-markup))
+  (markdown-ts--set-hide-markup markdown-ts-hide-markup))
 
 (defun markdown-ts-appear--validate-math-options ()
   "Signal a user error when a math preview option is invalid."
@@ -1855,13 +1876,11 @@ The value has the same form as `markdown-ts-appear-link-icon'."
          (and enabled-p markdown-ts-appear--managed-line-height-p)))
     (dolist (clone (markdown-ts-appear--live-indirect-clones))
       (with-current-buffer clone
-        (let ((hide-markup
-               (if enabled-p
-                   t
-                 markdown-ts-appear--previous-hide-markup)))
-          (unless (eq markdown-ts-hide-markup hide-markup)
-            (setq markdown-ts-hide-markup hide-markup)
-            (markdown-ts--set-hide-markup hide-markup)))
+        (if enabled-p
+            (unless markdown-ts-hide-markup
+              (setq markdown-ts-hide-markup t)
+              (markdown-ts--set-hide-markup t))
+          (markdown-ts-appear--restore-hide-markup))
         (cond
          (manage-line-height
           (unless (memq 'line-height font-lock-extra-managed-props)
@@ -2008,7 +2027,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
 When EXISTING-P is non-nil, preserve its prior Markdown display settings."
   (when-let* ((base (buffer-base-buffer)))
     (when existing-p
-      (setq markdown-ts-appear--previous-hide-markup markdown-ts-hide-markup)
+      (markdown-ts-appear--save-hide-markup)
       (setq markdown-ts-appear--managed-line-height-p nil))
     (let ((clone (current-buffer)))
       (with-current-buffer base
@@ -2046,6 +2065,14 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
       (setq evil-insert-state-exit-hook
             (remove #'markdown-ts-appear--stop
                     evil-insert-state-exit-hook)))
+    (when (boundp 'meow-insert-enter-hook)
+      (setq meow-insert-enter-hook
+            (remove #'markdown-ts-appear--start
+                    meow-insert-enter-hook)))
+    (when (boundp 'meow-insert-exit-hook)
+      (setq meow-insert-exit-hook
+            (remove #'markdown-ts-appear--stop
+                    meow-insert-exit-hook)))
     (setq window-buffer-change-functions
           (remove #'markdown-ts-appear--math-preview-window
                   window-buffer-change-functions))
@@ -2104,6 +2131,13 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
      (add-hook 'evil-insert-state-exit-hook
                #'markdown-ts-appear--stop nil t)
      (when (eq (bound-and-true-p evil-state) 'insert)
+       (markdown-ts-appear--start)))
+    ('meow-insert
+     (add-hook 'meow-insert-enter-hook
+               #'markdown-ts-appear--start nil t)
+     (add-hook 'meow-insert-exit-hook
+               #'markdown-ts-appear--stop nil t)
+     (when (bound-and-true-p meow-insert-mode)
        (markdown-ts-appear--start)))))
 
 (defun markdown-ts-appear--disable-trigger ()
@@ -2113,6 +2147,12 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
                  #'markdown-ts-appear--start t))
   (when (boundp 'evil-insert-state-exit-hook)
     (remove-hook 'evil-insert-state-exit-hook
+                 #'markdown-ts-appear--stop t))
+  (when (boundp 'meow-insert-enter-hook)
+    (remove-hook 'meow-insert-enter-hook
+                 #'markdown-ts-appear--start t))
+  (when (boundp 'meow-insert-exit-hook)
+    (remove-hook 'meow-insert-exit-hook
                  #'markdown-ts-appear--stop t))
   (markdown-ts-appear--stop))
 
@@ -2139,7 +2179,7 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
        (markdown-ts-appear--deactivate-local-mode
         'markdown-ts-appear-mode)
        (signal (car error-data) (cdr error-data))))
-    (setq markdown-ts-appear--previous-hide-markup markdown-ts-hide-markup)
+    (markdown-ts-appear--save-hide-markup)
     (setq markdown-ts-appear--setup-p t)
     (markdown-ts-appear--adopt-existing-indirect-clones)
     (markdown-ts-appear--install-all-view-rendering)
@@ -2194,8 +2234,7 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
       (markdown-ts-appear--delete-rendering-overlays)
       (markdown-ts-appear--delete-indirect-rendering-overlays)
       (markdown-ts-appear--sync-indirect-clone-markup nil)
-      (setq markdown-ts-hide-markup markdown-ts-appear--previous-hide-markup)
-      (markdown-ts--set-hide-markup markdown-ts-hide-markup)
+      (markdown-ts-appear--restore-hide-markup)
       (unless markdown-ts-appear--tearing-down-buffer-p
         (condition-case nil
             (font-lock-ensure (point-min) (point-max))
