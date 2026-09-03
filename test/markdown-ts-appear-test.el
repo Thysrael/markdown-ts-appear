@@ -1285,6 +1285,18 @@
    (markdown-ts-appear--update)
    (should-not (get-text-property (point-min) 'display))))
 
+(ert-deftest markdown-ts-appear-test-table-background-stops-at-line-end ()
+  (markdown-ts-appear-test--with-buffer
+   "| A | B |\n|---|---|\n| 1 | 2 |\n"
+   (goto-char (point-min))
+   (let ((line-end (line-end-position)))
+     (should
+      (memq 'markdown-ts-appear-table-line-end
+            (get-text-property line-end 'face)))
+     (should-not
+      (memq 'markdown-ts-appear-table-line-end
+            (get-text-property (1- line-end) 'face))))))
+
 (ert-deftest markdown-ts-appear-test-renders-table-without-edge-pipes ()
   (markdown-ts-appear-test--with-buffer
    "Element | Status\n--------|-------\nHeading | Ready\n"

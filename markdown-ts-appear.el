@@ -189,6 +189,11 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   "Face used for rendered table borders."
   :group 'markdown-ts-appear)
 
+(defface markdown-ts-appear-table-line-end
+  '((t :inherit markdown-ts-table :extend nil))
+  "Face preventing rendered table backgrounds from extending past the table."
+  :group 'markdown-ts-appear)
+
 (defvar-local markdown-ts-appear-mode nil
   "Non-nil when Markdown TS Appear mode is enabled.")
 
@@ -1655,6 +1660,11 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   "Render Markdown pipe table NODE between START and LIMIT."
   (when (and (markdown-ts-appear--active-p)
              (eq markdown-ts-appear-table-style 'unicode))
+    (save-excursion
+      (goto-char (max start (treesit-node-start node)))
+      (while (search-forward "\n" (min limit (treesit-node-end node)) t)
+        (add-face-text-property
+         (1- (point)) (point) 'markdown-ts-appear-table-line-end)))
     (dolist (row (markdown-ts-appear--table-rows-in-range node start limit))
       (markdown-ts-appear--fontify-table-row row start limit))))
 
