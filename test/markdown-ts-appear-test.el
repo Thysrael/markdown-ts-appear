@@ -1060,7 +1060,7 @@
 
 (ert-deftest markdown-ts-appear-test-renders-code-inside-quote ()
   (markdown-ts-appear-test--with-buffer
-      "> ```bash\n> git config http.postBuffer 524288000\n> ```\n"
+      "> ```text\n> git config http.postBuffer 524288000\n> ```\n"
     (let ((body-quote
            (save-excursion
              (goto-char (point-min))
