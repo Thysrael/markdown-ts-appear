@@ -306,6 +306,24 @@ The value has the same form as `markdown-ts-appear-link-icon'."
        beg end `(line-prefix ,display wrap-prefix ,display
                  markdown-ts-appear--decoration t)))))
 
+(defun markdown-ts-appear--code-quote-prefix (source)
+  "Render quoted code prefix SOURCE followed by a code block marker."
+  (let ((marker
+         (or (markdown-ts-appear--display-string
+              markdown-ts-appear-block-quote-marker)
+             ">")))
+    (concat
+     (mapconcat
+      (lambda (character)
+        (if (eq character ?>)
+            (propertize
+             marker 'face '(markdown-ts-appear-block-quote-marker
+                            markdown-ts-appear-code-fence-marker))
+          (propertize
+           (string character) 'face 'markdown-ts-appear-code-fence-marker)))
+      source)
+     (propertize "│ " 'face 'markdown-ts-appear-code-fence-marker))))
+
 (defun markdown-ts-appear--node-ancestor (node type)
   "Return NODE or its nearest ancestor whose type is TYPE."
   (while (and node (not (equal (treesit-node-type node) type)))
@@ -1293,12 +1311,82 @@ The value has the same form as `markdown-ts-appear-link-icon'."
              (eq markdown-ts-appear-code-fence-style 'connected))
     (when-let* ((content
                  (markdown-ts-appear--first-direct-child-of-type
-                  node "code_fence_content"))
-                (beg (max start (treesit-node-start content)))
-                (end (min limit (treesit-node-end content)))
-                ((< beg end)))
-      (markdown-ts-appear--decorate-line-prefix
-       beg end "│ " 'markdown-ts-appear-code-fence-marker))))
+                  node "code_fence_content")))
+      (let* ((delimiters
+              (markdown-ts-appear--direct-children-of-type
+               node "fenced_code_block_delimiter"))
+             (closing (and (cdr delimiters) (car (last delimiters))))
+             (body-beg
+              (save-excursion
+                (goto-char (treesit-node-start content))
+                (line-beginning-position)))
+             (body-end
+              (if closing
+                  (save-excursion
+                    (goto-char (treesit-node-start closing))
+                    (line-beginning-position))
+                (treesit-node-end content)))
+             (quote
+              (markdown-ts-appear--node-ancestor
+               (treesit-node-parent node) "block_quote")))
+        (if (not quote)
+            (let ((beg (max start body-beg))
+                  (end (min limit body-end)))
+              (when (< beg end)
+                (markdown-ts-appear--decorate-line-prefix
+                 beg end "│ " 'markdown-ts-appear-code-fence-marker)))
+          (let* ((content-beg (treesit-node-start content))
+                 (source-prefix
+                  (buffer-substring-no-properties body-beg content-beg))
+                 (wrap-prefix
+                  (markdown-ts-appear--code-quote-prefix source-prefix))
+                 (beg (max start content-beg))
+                 (end (min limit body-end)))
+            (when (< beg end)
+              (with-silent-modifications
+                (add-text-properties
+                 beg end `(wrap-prefix ,wrap-prefix
+                           markdown-ts-appear--decoration t))))
+          (save-excursion
+            (goto-char (max start body-beg))
+            (beginning-of-line)
+            (when (< (point) body-beg)
+              (goto-char body-beg))
+            (while (< (point) (min limit body-end))
+              (let ((line-end (min limit body-end (line-end-position))))
+                (back-to-indentation)
+                (when (looking-at "\\(?:>[ \\t]?\\)+")
+                  (let ((prefix-end (min line-end (match-end 0)))
+                        marker-beg)
+                    (while (search-forward ">" prefix-end t)
+                      (setq marker-beg (1- (point))))
+                    (when (and marker-beg
+                               (<= start marker-beg)
+                               (not (markdown-ts-appear--region-visible-p
+                                     marker-beg (1+ marker-beg))))
+                      (let* ((marker
+                              (or (markdown-ts-appear--display-string
+                                   markdown-ts-appear-block-quote-marker)
+                                  ">"))
+                             (marker-end
+                              (if (memq (char-after (1+ marker-beg))
+                                        '(?\s ?\t))
+                                  (+ marker-beg 2)
+                                (1+ marker-beg)))
+                             (display
+                              (concat
+                               (propertize
+                                marker
+                                'face
+                                '(markdown-ts-appear-block-quote-marker
+                                  markdown-ts-appear-code-fence-marker))
+                               (propertize
+                                " │ "
+                                'face
+                                'markdown-ts-appear-code-fence-marker))))
+                        (markdown-ts-appear--decorate
+                         marker-beg marker-end display nil)))))
+                (forward-line 1))))))))))
 
 (defun markdown-ts-appear--fontify-quote-marker (node visible-p start limit)
   "Render quote marker NODE between START and LIMIT unless VISIBLE-P."

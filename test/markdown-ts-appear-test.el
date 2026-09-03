@@ -1058,6 +1058,45 @@
             (should (equal (get-text-property content-beg 'line-prefix) "│ ")))
         (kill-buffer clone)))))
 
+(ert-deftest markdown-ts-appear-test-renders-code-inside-quote ()
+  (markdown-ts-appear-test--with-buffer
+      "> ```bash\n> git config http.postBuffer 524288000\n> ```\n"
+    (let ((body-quote
+           (save-excursion
+             (goto-char (point-min))
+             (forward-line 1)
+             (point)))
+          (body-content
+           (save-excursion
+             (goto-char (point-min))
+             (forward-line 1)
+             (search-forward "git")
+             (match-beginning 0)))
+          (closing-quote
+           (save-excursion
+             (goto-char (point-min))
+             (forward-line 2)
+             (point)))
+          (closing-fence
+           (save-excursion
+             (goto-char (point-min))
+             (forward-line 2)
+             (search-forward "```")
+             (match-beginning 0))))
+      (should (equal (get-text-property body-quote 'display) "▎ │ "))
+      (should-not (get-text-property body-quote 'line-prefix))
+      (should (equal (get-text-property body-content 'wrap-prefix) "▎ │ "))
+      (should (equal (get-text-property closing-quote 'display) "▎"))
+      (should-not (get-text-property closing-quote 'line-prefix))
+      (should-not (get-text-property closing-quote 'wrap-prefix))
+      (should (equal (get-text-property closing-fence 'display) "╰─"))
+      (goto-char (1+ body-quote))
+      (markdown-ts-appear--update)
+      (should-not (get-text-property body-quote 'display))
+      (goto-char (point-max))
+      (markdown-ts-appear--update)
+      (should (equal (get-text-property body-quote 'display) "▎ │ ")))))
+
 (ert-deftest markdown-ts-appear-test-renders-unicode-table ()
   (markdown-ts-appear-test--with-buffer
    "| Element | Status |\n|:--------|-------:|\n| Heading | Ready  |\n"
