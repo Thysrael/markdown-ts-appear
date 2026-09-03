@@ -153,6 +153,13 @@
       (goto-char (point-min))
       (search-forward "[!warning]-")
       (let ((beg (match-beginning 0)))
+        (should-not (button-at (+ beg 2)))
+        (should-not (get-text-property (+ beg 2) 'help-echo))
+        (should-not
+         (seq-find
+          (lambda (overlay)
+            (overlay-get overlay 'markdown-ts-appear--link-icon))
+          (overlays-in beg (match-end 0))))
         (let ((display (get-text-property beg 'display)))
           (should (equal display " warning "))
           (should (eq (get-text-property 0 'face display)
@@ -167,6 +174,7 @@
         (goto-char (1- (match-end 0)))
         (markdown-ts-appear--update)
         (should-not (get-text-property beg 'display))
+        (should-not (button-at (+ beg 2)))
         (goto-char (point-max))
         (markdown-ts-appear--update)
         (should (equal (get-text-property beg 'display) " warning "))))))
@@ -1097,6 +1105,7 @@
     (goto-char (point-min))
     (forward-line 1)
     (let ((content-beg (point))
+          (managed-properties (copy-sequence font-lock-extra-managed-props))
           (clone (clone-indirect-buffer " *markdown-code-clone*" nil)))
       (unwind-protect
           (progn
@@ -1105,8 +1114,32 @@
               (font-lock-flush)
               (font-lock-ensure)
               (should (equal (get-text-property content-beg 'line-prefix)
-                             "│ ")))
-            (should (equal (get-text-property content-beg 'line-prefix) "│ ")))
+                              "│ ")))
+            (should (equal (get-text-property content-beg 'line-prefix) "│ "))
+            (should (equal font-lock-extra-managed-props managed-properties))
+            (kill-buffer clone)
+            (setq clone nil)
+            (should (equal font-lock-extra-managed-props managed-properties)))
+        (when (buffer-live-p clone)
+          (kill-buffer clone))))))
+
+(ert-deftest markdown-ts-appear-test-clone-edit-clears-stale-code-prefix ()
+  (markdown-ts-appear-test--with-buffer "```text\ncontent\n```\n"
+    (goto-char (point-min))
+    (forward-line 1)
+    (let ((content-beg (copy-marker (point)))
+          (clone (clone-indirect-buffer " *markdown-code-edit-clone*" nil)))
+      (unwind-protect
+          (progn
+            (with-current-buffer clone
+              (goto-char (point-min))
+              (delete-char 1)
+              (font-lock-ensure))
+            (should (equal (treesit-node-type
+                            (treesit-node-at content-beg 'markdown))
+                           "inline"))
+            (should-not (get-text-property content-beg 'line-prefix)))
+        (set-marker content-beg nil)
         (kill-buffer clone)))))
 
 (ert-deftest markdown-ts-appear-test-renders-code-inside-quote ()

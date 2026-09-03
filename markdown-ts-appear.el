@@ -660,6 +660,24 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                 ((< position end)))
       (cons beg end))))
 
+(defun markdown-ts-appear--callout-link-p (link)
+  "Return non-nil when shortcut LINK is a rendered callout marker."
+  (when (and markdown-ts-appear-render-callouts
+             (equal (treesit-node-type link) "shortcut_link"))
+    (when-let* ((markdown-node
+                 (markdown-ts-appear--markdown-node-at
+                  (treesit-node-start link)))
+                (quote
+                 (markdown-ts-appear--node-ancestor
+                  markdown-node "block_quote"))
+                (data (markdown-ts-appear--callout-data quote))
+                (beg (nth 0 data))
+                (end (nth 1 data))
+                (label-end
+                 (if (memq (char-before end) '(?+ ?-)) (1- end) end)))
+      (and (= (treesit-node-start link) beg)
+           (= (treesit-node-end link) label-end)))))
+
 (defun markdown-ts-appear--bounds ()
   "Return source bounds for the smallest rendered element at point."
   (let ((pos (point)))
@@ -1186,7 +1204,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   "Stop managing code prefix properties added by appear mode."
   (dolist (property markdown-ts-appear--managed-code-prefix-properties)
     (setq font-lock-extra-managed-props
-          (delq property font-lock-extra-managed-props)))
+          (remove property font-lock-extra-managed-props)))
   (setq markdown-ts-appear--managed-code-prefix-properties nil))
 
 (defun markdown-ts-appear--remove-block-font-lock ()
@@ -1731,6 +1749,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
             (and (markdown-ts-appear--node-ancestor-of-type node "image") t))
            (parent-beg (treesit-node-start parent))
            (parent-end (treesit-node-end parent))
+           (callout-p (markdown-ts-appear--callout-link-p parent))
            (wikilink-p
             (and (markdown-ts-appear--wikilink-bounds-for-node parent) t))
            (beg (treesit-node-start node))
@@ -1749,51 +1768,61 @@ The value has the same form as `markdown-ts-appear-link-icon'."
            (visible-p
             (or (markdown-ts-appear--region-visible-p parent-beg beg)
                 (markdown-ts-appear--region-visible-p end parent-end))))
-      (when reference-label-p
-        (with-silent-modifications
-          (if (and markdown-ts-hide-markup
-                   (not (markdown-ts-appear--node-visible-p node)))
-              (put-text-property beg end 'invisible 'markdown-ts--markup)
-            (remove-text-properties beg end '(invisible nil)))))
-      (unless (or reference-label-p image-p)
-        (when alias-beg
-          (with-silent-modifications
-            (markdown-ts--make-link-button
-             beg end
-             (buffer-substring-no-properties
-              beg (treesit-node-start alias-delimiter)))))
-        (dolist (overlay (overlays-in beg end))
-          (when (overlay-get overlay 'markdown-ts-appear--link-icon)
-            (delete-overlay overlay)))
-        (when (and markdown-ts-hide-markup
-                   (not (equal (treesit-node-type parent) "image"))
-                   (not visible-p))
-          (when wikilink-p
+      (if callout-p
+          (progn
             (with-silent-modifications
-              (put-text-property (1- parent-beg) parent-beg
-				 'invisible 'markdown-ts--markup)
-              (put-text-property parent-end (1+ parent-end)
-				 'invisible 'markdown-ts--markup)
-              (when alias-beg
-		(if (and visible-beg visible-end
-			 (< visible-beg alias-beg) (> visible-end beg))
-                    (let ((reveal-beg (max beg visible-beg))
-                          (reveal-end (min alias-beg visible-end)))
-                      (when (< beg reveal-beg)
-			(put-text-property beg reveal-beg
-                                           'invisible 'markdown-ts--markup))
-                      (when (< reveal-end alias-beg)
-			(put-text-property reveal-end alias-beg
-                                           'invisible 'markdown-ts--markup)))
-                  (put-text-property beg alias-beg
-                                     'invisible 'markdown-ts--markup)))))
-          (when-let* ((icon (markdown-ts-appear--icon
-                             (if wikilink-p 'wikilink 'link))))
-            (let ((overlay (make-overlay icon-beg (min (1+ icon-beg) end)
-					 nil t nil)))
-              (overlay-put overlay 'markdown-ts-appear--link-icon t)
-              (overlay-put overlay 'before-string (concat icon " "))
-              (overlay-put overlay 'evaporate t))))))))
+              (remove-list-of-text-properties
+               parent-beg parent-end
+               '(action button category follow-link help-echo keymap
+                        mouse-face)))
+            (dolist (overlay (overlays-in parent-beg parent-end))
+              (when (overlay-get overlay 'markdown-ts-appear--link-icon)
+                (delete-overlay overlay))))
+        (when reference-label-p
+          (with-silent-modifications
+            (if (and markdown-ts-hide-markup
+                     (not (markdown-ts-appear--node-visible-p node)))
+                (put-text-property beg end 'invisible 'markdown-ts--markup)
+              (remove-text-properties beg end '(invisible nil)))))
+        (unless (or reference-label-p image-p)
+          (when alias-beg
+            (with-silent-modifications
+              (markdown-ts--make-link-button
+               beg end
+               (buffer-substring-no-properties
+                beg (treesit-node-start alias-delimiter)))))
+          (dolist (overlay (overlays-in beg end))
+            (when (overlay-get overlay 'markdown-ts-appear--link-icon)
+              (delete-overlay overlay)))
+          (when (and markdown-ts-hide-markup
+                     (not (equal (treesit-node-type parent) "image"))
+                     (not visible-p))
+            (when wikilink-p
+              (with-silent-modifications
+                (put-text-property (1- parent-beg) parent-beg
+                                   'invisible 'markdown-ts--markup)
+                (put-text-property parent-end (1+ parent-end)
+                                   'invisible 'markdown-ts--markup)
+                (when alias-beg
+                  (if (and visible-beg visible-end
+                           (< visible-beg alias-beg) (> visible-end beg))
+                      (let ((reveal-beg (max beg visible-beg))
+                            (reveal-end (min alias-beg visible-end)))
+                        (when (< beg reveal-beg)
+                          (put-text-property beg reveal-beg
+                                             'invisible 'markdown-ts--markup))
+                        (when (< reveal-end alias-beg)
+                          (put-text-property reveal-end alias-beg
+                                             'invisible 'markdown-ts--markup)))
+                    (put-text-property beg alias-beg
+                                       'invisible 'markdown-ts--markup)))))
+            (when-let* ((icon (markdown-ts-appear--icon
+                               (if wikilink-p 'wikilink 'link))))
+              (let ((overlay (make-overlay icon-beg (min (1+ icon-beg) end)
+                                           nil t nil)))
+                (overlay-put overlay 'markdown-ts-appear--link-icon t)
+                (overlay-put overlay 'before-string (concat icon " "))
+                (overlay-put overlay 'evaporate t)))))))))
 
 (defun markdown-ts-appear--delete-rendering-overlays (&optional beg end)
   "Delete package rendering overlays between BEG and END."
@@ -1836,9 +1865,9 @@ The value has the same form as `markdown-ts-appear-link-icon'."
             (add-to-list 'font-lock-extra-managed-props 'line-height)
             (setq markdown-ts-appear--managed-line-height-p t)))
          (markdown-ts-appear--managed-line-height-p
-          (setq font-lock-extra-managed-props
-                (delq 'line-height font-lock-extra-managed-props))
-          (setq markdown-ts-appear--managed-line-height-p nil)))))))
+           (setq font-lock-extra-managed-props
+                 (remove 'line-height font-lock-extra-managed-props))
+           (setq markdown-ts-appear--managed-line-height-p nil)))))))
 
 (defun markdown-ts-appear--adopt-existing-indirect-clones ()
   "Register existing Markdown indirect clones of the current buffer."
@@ -1879,11 +1908,19 @@ The value has the same form as `markdown-ts-appear-link-icon'."
               (font-lock-ensure line-beg line-end))))))))
 
 (defun markdown-ts-appear--parser-changed (ranges _parser)
-  "Remove stale rendering overlays in Tree-sitter changed RANGES."
-  (dolist (range ranges)
-    (markdown-ts-appear--delete-shared-rendering-overlays
-     (max (point-min) (1- (car range)))
-     (min (point-max) (1+ (cdr range))))))
+  "Invalidate rendering in Tree-sitter changed RANGES."
+  (let ((owner (if (buffer-live-p markdown-ts-appear--base-owner)
+                   markdown-ts-appear--base-owner
+                 (current-buffer))))
+    (with-current-buffer owner
+      (save-restriction
+        (widen)
+        (dolist (range ranges)
+          (let ((beg (max (point-min) (1- (car range))))
+                (end (min (point-max) (1+ (cdr range)))))
+            (markdown-ts-appear--delete-shared-rendering-overlays beg end)
+            (font-lock-unfontify-region beg end)
+            (font-lock-flush beg end)))))))
 
 (defun markdown-ts-appear--install-parser-notifiers ()
   "Install package change notifiers on the Markdown parsers."
@@ -1949,14 +1986,14 @@ The value has the same form as `markdown-ts-appear-link-icon'."
       (markdown-ts-appear--remove-view-rendering)
       (markdown-ts-appear--math-remove-filter)
       (setq font-lock-extra-managed-props
-            (delq 'markdown-ts-appear--decoration
-                  (delq 'markdown-ts-appear--math-state
-                        font-lock-extra-managed-props)))
+            (remove 'markdown-ts-appear--decoration
+                    (remove 'markdown-ts-appear--math-state
+                            font-lock-extra-managed-props)))
       (markdown-ts-appear--release-code-prefix-properties)
       (add-to-list 'font-lock-extra-managed-props 'display)
       (when markdown-ts-appear--managed-line-height-p
         (setq font-lock-extra-managed-props
-              (delq 'line-height font-lock-extra-managed-props))
+              (remove 'line-height font-lock-extra-managed-props))
         (setq markdown-ts-appear--managed-line-height-p nil))
       (setq markdown-ts-appear--base-owner nil)))
   (setq markdown-ts-appear--indirect-clones nil))
@@ -2022,9 +2059,9 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
     ;; The clone shares rendered text properties but has no parser to restore
     ;; them.
     (setq font-lock-extra-managed-props
-          (delq 'display
-                (delq 'markdown-ts-appear--decoration
-                      font-lock-extra-managed-props)))
+          (remove 'display
+                  (remove 'markdown-ts-appear--decoration
+                          font-lock-extra-managed-props)))
     (markdown-ts-appear--release-code-prefix-properties)
     (markdown-ts-appear--install-view-rendering)))
 
@@ -2161,11 +2198,11 @@ When EXISTING-P is non-nil, preserve its prior Markdown display settings."
            (font-lock-flush (point-min) (point-max)))))
       (when markdown-ts-appear--managed-line-height-p
         (setq font-lock-extra-managed-props
-              (delq 'line-height font-lock-extra-managed-props))
+              (remove 'line-height font-lock-extra-managed-props))
         (setq markdown-ts-appear--managed-line-height-p nil))
       (setq font-lock-extra-managed-props
-            (delq 'markdown-ts-appear--decoration
-                  font-lock-extra-managed-props)))
+            (remove 'markdown-ts-appear--decoration
+                    font-lock-extra-managed-props)))
     (markdown-ts-appear--release-code-prefix-properties)
     (markdown-ts-appear--release-indirect-clones)
     (setq markdown-ts-appear--setup-p nil)))
