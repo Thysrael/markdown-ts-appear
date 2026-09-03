@@ -36,12 +36,19 @@ With ~use-package~ and ~package-vc~:
 * Activation
 
 The default ~always~ trigger follows point whenever the minor mode is active.
-The optional ~evil-insert~ trigger follows Evil's insert-state hooks without
-making Evil a package dependency:
+For a modal editor, choose ~manual~ and connect the public start and stop
+commands to its editing-state hooks:
 
 #+begin_src emacs-lisp
-(setq markdown-ts-appear-trigger 'evil-insert)
+(setq markdown-ts-appear-trigger 'manual)
+(add-hook 'my-insert-state-entry-hook
+          #'markdown-ts-appear-manual-start)
+(add-hook 'my-insert-state-exit-hook
+          #'markdown-ts-appear-manual-stop)
 #+end_src
+
+The package contains no Evil- or Meow-specific behavior; either editor can use
+the same manual interface.
 
 * Scope and cooperation
 

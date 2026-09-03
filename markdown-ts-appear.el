@@ -42,10 +42,6 @@
 (require 'markdown-ts-mode)
 (require 'seq)
 
-(defvar evil-insert-state-entry-hook)
-(defvar evil-insert-state-exit-hook)
-(defvar evil-state)
-
 (defgroup markdown-ts-appear nil
   "Reveal Markdown source at point."
   :group 'markdown-ts
@@ -54,9 +50,9 @@
 (defcustom markdown-ts-appear-trigger 'always
   "When `markdown-ts-appear-mode' should reveal source.
 With `always', track point whenever the mode is enabled.  With
-`evil-insert', track point only while Evil is in insert state."
+`manual', wait for `markdown-ts-appear-manual-start'."
   :type '(choice (const :tag "Whenever the mode is enabled" always)
-                 (const :tag "Only in Evil insert state" evil-insert)))
+                 (const :tag "Only after an explicit start" manual)))
 
 (defvar-local markdown-ts-appear-mode nil
   "Non-nil when Markdown TS Appear mode is enabled.")
@@ -274,6 +270,22 @@ With `always', track point whenever the mode is enabled.  With
         markdown-ts-appear--last-tick nil)
   (markdown-ts-appear--restore))
 
+;;;###autoload
+(defun markdown-ts-appear-manual-start ()
+  "Start revealing Markdown source in a manually triggered buffer."
+  (interactive)
+  (unless markdown-ts-appear-mode
+    (user-error "Markdown-ts-appear-mode is not enabled"))
+  (markdown-ts-appear--start))
+
+;;;###autoload
+(defun markdown-ts-appear-manual-stop ()
+  "Stop revealing Markdown source in a manually triggered buffer."
+  (interactive)
+  (unless markdown-ts-appear-mode
+    (user-error "Markdown-ts-appear-mode is not enabled"))
+  (markdown-ts-appear--stop))
+
 (defun markdown-ts-appear--fontify-node (function node &rest arguments)
   "Call FUNCTION for NODE with ARGUMENTS without concealing visible source."
   (if (not (markdown-ts-appear--active-p))
@@ -342,20 +354,10 @@ With `always', track point whenever the mode is enabled.  With
   "Enable point tracking according to `markdown-ts-appear-trigger'."
   (pcase markdown-ts-appear-trigger
     ('always (markdown-ts-appear--start))
-    ('evil-insert
-     (add-hook 'evil-insert-state-entry-hook
-               #'markdown-ts-appear--start nil t)
-     (add-hook 'evil-insert-state-exit-hook
-               #'markdown-ts-appear--stop nil t)
-     (when (eq (bound-and-true-p evil-state) 'insert)
-       (markdown-ts-appear--start)))))
+    ('manual nil)))
 
 (defun markdown-ts-appear--disable-trigger ()
   "Disable point tracking hooks in the current buffer."
-  (remove-hook 'evil-insert-state-entry-hook
-               #'markdown-ts-appear--start t)
-  (remove-hook 'evil-insert-state-exit-hook
-               #'markdown-ts-appear--stop t)
   (markdown-ts-appear--stop))
 
 (defun markdown-ts-appear--detach-indirect-clone ()
@@ -374,13 +376,7 @@ With `always', track point whenever the mode is enabled.  With
           (remove #'markdown-ts-appear--buffer-teardown kill-buffer-hook)
           clone-indirect-buffer-hook
           (remove #'markdown-ts-appear--detach-indirect-clone
-                  clone-indirect-buffer-hook)
-          evil-insert-state-entry-hook
-          (remove #'markdown-ts-appear--start
-                  evil-insert-state-entry-hook)
-          evil-insert-state-exit-hook
-          (remove #'markdown-ts-appear--stop
-                  evil-insert-state-exit-hook))
+                  clone-indirect-buffer-hook))
     (setq local-minor-modes
           (remove 'markdown-ts-appear-mode local-minor-modes))))
 

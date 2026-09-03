@@ -196,15 +196,17 @@
       (setq markdown-ts-appear--active-buffers nil)
       (markdown-ts-appear--remove-advice))))
 
-(ert-deftest markdown-ts-appear-test-evil-trigger-follows-state-hooks ()
-  (let ((markdown-ts-appear-trigger 'evil-insert))
+(ert-deftest markdown-ts-appear-test-manual-trigger-waits-for-start ()
+  (let ((markdown-ts-appear-trigger 'manual))
     (markdown-ts-appear-test--with-buffer "A *word* here\n"
       (should-not (memq #'markdown-ts-appear--update post-command-hook))
       (should-not markdown-ts-appear--region)
       (markdown-ts-appear-test--goto "word" 2)
-      (markdown-ts-appear--start)
+      (markdown-ts-appear-manual-start)
+      (should (memq #'markdown-ts-appear--update post-command-hook))
       (should markdown-ts-appear--region)
-      (markdown-ts-appear--stop)
+      (markdown-ts-appear-manual-stop)
+      (should-not (memq #'markdown-ts-appear--update post-command-hook))
       (should-not markdown-ts-appear--region))))
 
 (provide 'markdown-ts-appear-test)
