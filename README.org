@@ -1,8 +1,6 @@
 #+title: markdown-ts-appear
 
-#+begin_center
-Rendered while reading. Source when editing.
-#+end_center
+#+html: <p align="center"><strong>Rendered while reading. Source when editing.</strong></p>
 
 [[https://github.com/Thysrael/markdown-ts-appear/actions/workflows/ci.yml][file:https://img.shields.io/github/actions/workflow/status/Thysrael/markdown-ts-appear/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build#.svg]]
 [[https://github.com/Thysrael/markdown-ts-appear/releases/latest][file:https://img.shields.io/github/v/release/Thysrael/markdown-ts-appear?display_name=tag&sort=semver&style=for-the-badge&logo=github&logoColor=white#.svg]]
@@ -11,9 +9,24 @@ Rendered while reading. Source when editing.
 
 [[file:examples/appear.gif]]
 
-Reveal the source of the rendered Markdown element at point in Emacs'
-built-in ~markdown-ts-mode~.  Optionally, LaTeX fragments can be rendered
-asynchronously with MathJax while they are not being edited.
+Can plain text keep its source while feeling almost rendered?
+
+~markdown-ts-appear~ builds on Emacs 31's Tree-sitter-powered
+~markdown-ts-mode~ to do both: Markdown stays visually rendered while reading,
+then the smallest element at point smoothly reveals its source for editing.
+The characters themselves become the interface: headings, quotes, code blocks,
+tables, and callouts are shaped with fonts, spacing, Unicode, and native display
+properties, not a separate preview or browser-like UI.  Optional MathJax support
+renders LaTeX fragments asynchronously.
+
+* Highlights
+
+- Smooth, syntax-aware reveal powered by Tree-sitter
+- Focused editing: reveal only the element at point
+- An interface made from characters, not browser-like widgets
+- Optional decorations for links, code fences, quotes, callouts, and tables
+- Optional asynchronous LaTeX preview through MathJax
+- Insert-state-aware reveal for Evil and Meow
 
 * Requirements
 
@@ -23,14 +36,6 @@ asynchronously with MathJax while they are not being edited.
 Math preview is disabled by default.  It additionally requires the optional
 ~mathjax~ Emacs package and Node.js, neither of which is installed by this
 package.  Preview is attempted only in a graphical SVG-capable session.
-
-CI tests both the latest Markdown grammar and commit
-~413285231ce8fa8b11e7074bbe265b48aa7277f9~ as a reproducible baseline.
-Most matrix jobs intentionally run without ~mathjax~; one installs it and
-performs a real MathJax-to-SVG render.  CI also runs weekly against Emacs
-snapshot and checks the calling conventions of every private ~markdown-ts-mode~
-function used by the package, so upstream API changes fail CI even when this
-repository has received no new commits.
 
 * Installation
 
@@ -44,18 +49,13 @@ With ~use-package~ and ~package-vc~:
   :hook (markdown-ts-mode . markdown-ts-appear-mode))
 #+end_src
 
-Markup is hidden automatically and the smallest semantic element at point is
-revealed.  Images without alt text keep their file name visible.  Visual
-decorations are opt-in, so links, fenced code blocks, block quotes, and pipe
-tables retain their normal ~markdown-ts-mode~ appearance by default.  Wiki
-links such as ~[[target|alias]]~ are supported with the grammar's default
-configuration.
+Visual decorations are opt-in; without further configuration, elements retain
+their normal ~markdown-ts-mode~ appearance.  Wiki links such as
+~[[target|alias]]~ are supported by the grammar's default configuration.
 
-* Visual Decorations
+* Customization
 
-Icon and quote marker values are plain strings and do not require an icon
-package.  A cons cell selects its first string when every character is
-displayable and its fallback otherwise.  For example:
+One possible setup:
 
 #+begin_src emacs-lisp
 (setq markdown-ts-appear-link-icon '("" . "↗")
@@ -67,10 +67,24 @@ displayable and its fallback otherwise.  For example:
       markdown-ts-appear-table-style 'unicode)
 #+end_src
 
-These strings can instead use characters supplied by your preferred font.
-The package does not depend on ~nerd-icons~ or choose a font for you.  Emacs 31
-also provides ~icons.el~, but it has no generic link or image icon and its
-image-backed strings are not used as portable text fallbacks here.
+Icons and quote markers are plain strings, with no icon-package dependency.  A
+cons cell such as ~("" . "↗")~ uses the first string when its characters are
+displayable and otherwise falls back to the second.
+
+Key options:
+
+- ~markdown-ts-appear-trigger~: reveal always, or only in Evil/Meow insert state.
+- ~markdown-ts-appear-link-icon~, ~markdown-ts-appear-image-icon~, and
+  ~markdown-ts-appear-wikilink-icon~: add link prefix icons.
+- ~markdown-ts-appear-code-fence-style~: use raw fences or connected Unicode
+  lines.
+- ~markdown-ts-appear-label-caps~: surround code-language and callout labels.
+- ~markdown-ts-appear-render-callouts~: render callout labels such as
+  ~[!WARNING]-~; folding is not included.
+- ~markdown-ts-appear-block-quote-marker~: replace block quote markers.
+- ~markdown-ts-appear-table-style~: use raw or Unicode table delimiters without
+  adding or aligning borders.
+
 Re-enable ~markdown-ts-appear-mode~ after changing structural decoration
 options in an active buffer.
 
@@ -89,6 +103,9 @@ Install and opt into the optional MathJax integration separately:
 If the option is enabled without ~mathjax~, the main appear mode remains active
 and reports that math preview is unavailable.  Re-enable the main mode after
 installing ~mathjax~ or changing this option.
+
+Related options are ~markdown-ts-appear-math-timeout~,
+~markdown-ts-appear-center-display-math~, and ~markdown-ts-appear-math-scale~.
 
 To render image files themselves, also enable the built-in
 ~markdown-ts-inline-images~ option or run ~markdown-ts-toggle-inline-images~.
@@ -109,32 +126,6 @@ For Meow:
 #+begin_src emacs-lisp
 (setq markdown-ts-appear-trigger 'meow-insert)
 #+end_src
-
-* Options
-
-- ~markdown-ts-appear-trigger~ controls when source is revealed.
-- ~markdown-ts-appear-enable-math-preview~ enables MathJax previews and defaults
-  to nil.
-- ~markdown-ts-appear-math-timeout~ controls rendering timeouts.
-- ~markdown-ts-appear-center-display-math~ controls display math alignment.
-- ~markdown-ts-appear-math-scale~ controls formula size and defaults to ~1.1~.
-- ~markdown-ts-appear-link-icon~, ~markdown-ts-appear-image-icon~, and
-  ~markdown-ts-appear-wikilink-icon~ control link prefix icons and default to
-  nil.
-- ~markdown-ts-appear-code-fence-style~ is either ~raw~ or ~connected~ and
-  defaults to ~raw~.  The connected style displays ~╭─ language~, prefixes
-  code lines with ~│~, and displays ~╰─~ for the closing fence.
-- ~markdown-ts-appear-label-caps~ optionally surrounds label text with left and
-  right strings such as ~("" . "")~.  Label text uses inverse video while the
-  caps use its background color as their foreground, forming one shape.
-- ~markdown-ts-appear-render-callouts~ recognizes callout markers such as
-  ~[!WARNING]-~ at the start of block quotes.  Callout and code-language labels
-  use inverse video, but callout folding is not implemented.
-- ~markdown-ts-appear-block-quote-marker~ controls the marker displayed on each
-  quoted line and defaults to nil.
-- ~markdown-ts-appear-table-style~ is either ~raw~ or ~unicode~ and defaults to
-  ~raw~.  The Unicode style replaces existing pipe-table delimiters without
-  adding or aligning borders.
 
 * Demo
 
@@ -160,6 +151,10 @@ Without ~MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS~, tests that require the Markdown
 Tree-sitter grammars are skipped when the grammars are unavailable.  To also
 require the optional package, Node.js, and a real MathJax-to-SVG render, add
 ~MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1~ before the command.
+
+CI covers the latest and baseline Markdown grammars, real MathJax-to-SVG
+rendering, Emacs snapshots, and compatibility with the private
+~markdown-ts-mode~ functions used by the package.
 
 * License
 
