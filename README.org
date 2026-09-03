@@ -1,5 +1,9 @@
 #+title: markdown-ts-appear
 
+#+begin_center
+Rendered while reading. Source when editing.
+#+end_center
+
 [[https://github.com/Thysrael/markdown-ts-appear/actions/workflows/ci.yml][file:https://img.shields.io/github/actions/workflow/status/Thysrael/markdown-ts-appear/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build#.svg]]
 [[https://github.com/Thysrael/markdown-ts-appear/releases/latest][file:https://img.shields.io/github/v/release/Thysrael/markdown-ts-appear?display_name=tag&sort=semver&style=for-the-badge&logo=github&logoColor=white#.svg]]
 [[https://www.gnu.org/software/emacs/][file:https://img.shields.io/badge/Emacs-31.1%2B-7F5AB6?style=for-the-badge&logo=gnuemacs&logoColor=white#.svg]]
@@ -21,6 +25,12 @@ The ~mathjax~ Emacs package is declared as a package dependency.  Preview is
 attempted only in a graphical SVG-capable session and remains disabled when
 MathJax cannot find Node.js.
 
+CI tests both the latest Markdown grammar and commit
+~413285231ce8fa8b11e7074bbe265b48aa7277f9~ as a reproducible baseline.
+It also runs weekly against Emacs snapshot and checks the calling conventions
+of every private ~markdown-ts-mode~ function used by the package, so upstream
+API changes fail CI even when this repository has received no new commits.
+
 * Installation
 
 With ~use-package~ and ~package-vc~:
@@ -38,7 +48,8 @@ the smallest semantic element at point is revealed.  Images without alt text
 keep their file name visible.  Fenced code block delimiters, info strings, and
 block quote markers remain visible instead of becoming empty lines.  Display
 math is centered by default.  Math preview is enabled when Emacs has SVG
-support and the buffer is displayed in a graphical frame.
+support and the buffer is displayed in a graphical frame.  Wiki links such as
+~[[target|alias]]~ are supported with the grammar's default configuration.
 
 Image icons are enabled by this package.  To render the image files themselves,
 also enable the built-in ~markdown-ts-inline-images~ option or run
@@ -74,15 +85,19 @@ the network.
 Run the tests with:
 
 #+begin_src shell
-MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1 emacs --batch -Q -L . \
+MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS=1 \
+MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1 \
+emacs --batch -Q -L . \
   --eval '(progn (require (quote package)) (package-initialize))' \
   -l test/markdown-ts-appear-test.el \
   -f ert-run-tests-batch-and-exit
 #+end_src
 
-Tests that require the Markdown Tree-sitter grammars are skipped when the
-grammars are unavailable.  The command above requires the ~mathjax~ package
-and Node.js so that it also exercises a real MathJax-to-SVG render.
+Without ~MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS~, tests that require the Markdown
+Tree-sitter grammars are skipped when the grammars are unavailable.  The
+command above requires both grammars, the ~mathjax~ package, and Node.js so it
+cannot report success after skipping core behavior and also exercises a real
+MathJax-to-SVG render.
 
 * License
 

@@ -3,19 +3,33 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   test:
+    name: Emacs ${{ matrix.emacs-version }} / grammar ${{ matrix.grammar-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        emacs-version:
-          - "31.1"
-          - snapshot
+        include:
+          - emacs-version: "31.1"
+            grammar-version: pinned
+            grammar-commit: "413285231ce8fa8b11e7074bbe265b48aa7277f9"
+          - emacs-version: "31.1"
+            grammar-version: latest
+            grammar-commit: ""
+          - emacs-version: snapshot
+            grammar-version: pinned
+            grammar-commit: "413285231ce8fa8b11e7074bbe265b48aa7277f9"
+          - emacs-version: snapshot
+            grammar-version: latest
+            grammar-commit: ""
 
     steps:
       - uses: actions/checkout@v5
@@ -25,25 +39,34 @@ jobs:
           version: ${{ matrix.emacs-version }}
 
       - name: Install Tree-sitter grammars
+        env:
+          MARKDOWN_GRAMMAR_COMMIT: ${{ matrix.grammar-commit }}
         run: |
           emacs --batch -Q --eval "(progn
             (require 'treesit)
-            (setq treesit-language-source-alist
-                  '((markdown
-                     \"https://github.com/tree-sitter-grammars/tree-sitter-markdown\"
-                     :commit \"413285231ce8fa8b11e7074bbe265b48aa7277f9\"
-                     :source-dir \"tree-sitter-markdown/src\")
-                    (markdown-inline
-                     \"https://github.com/tree-sitter-grammars/tree-sitter-markdown\"
-                     :commit \"413285231ce8fa8b11e7074bbe265b48aa7277f9\"
-                     :source-dir \"tree-sitter-markdown-inline/src\")
-                    (c
-                     \"https://github.com/tree-sitter/tree-sitter-c\"
-                     :commit \"3aa2995549d5d8b26928e8d3fa2770fd4327414e\")))
+            (require 'subr-x)
+            (let* ((commit (getenv \"MARKDOWN_GRAMMAR_COMMIT\"))
+                   (revision (unless (string-empty-p commit)
+                               (list :commit commit)))
+                   (repository
+                    \"https://github.com/tree-sitter-grammars/tree-sitter-markdown\"))
+              (setq treesit-language-source-alist
+                    (list
+                     (cons 'markdown
+                           (append (list repository) revision
+                                   (list :source-dir
+                                         \"tree-sitter-markdown/src\")))
+                     (cons 'markdown-inline
+                           (append (list repository) revision
+                                   (list :source-dir
+                                         \"tree-sitter-markdown-inline/src\")))
+                     '(c
+                       \"https://github.com/tree-sitter/tree-sitter-c\"
+                       :commit \"3aa2995549d5d8b26928e8d3fa2770fd4327414e\"))))
             (mapc #'treesit-install-language-grammar
                   '(markdown markdown-inline c))
             (unless (treesit-ready-p '(markdown markdown-inline c))
-              (error \"Required Tree-sitter grammars are unavailable\")))"
+              (error \"Required Tree-sitter grammars are unavailable\"))))"
 
       - name: Install package dependencies
         run: |
@@ -75,6 +98,7 @@ jobs:
 
       - name: Run tests
         env:
+          MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS: "1"
           MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX: "1"
         run: |
           emacs --batch -Q -L . \
