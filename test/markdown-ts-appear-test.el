@@ -109,7 +109,9 @@
   (dolist (variable '(markdown-ts-appear-link-icon
                       markdown-ts-appear-image-icon
                       markdown-ts-appear-wikilink-icon
-                      markdown-ts-appear-block-quote-marker))
+                      markdown-ts-appear-block-quote-marker
+                      markdown-ts-appear-label-caps
+                      markdown-ts-appear-render-callouts))
     (should-not (default-value variable)))
   (should (eq (default-value 'markdown-ts-appear-code-fence-style) 'raw))
   (should (eq (default-value 'markdown-ts-appear-table-style) 'raw)))
@@ -119,6 +121,46 @@
    (memq 'markdown-ts-code-block
          (face-attribute 'markdown-ts-appear-code-fence-marker
                          :inherit nil))))
+
+(ert-deftest markdown-ts-appear-test-renders-inverted-language-label ()
+  (let ((markdown-ts-appear-label-caps '("" . "")))
+    (markdown-ts-appear-test--with-buffer "```c\nint x;\n```\n"
+      (let ((display (get-text-property (point-min) 'display)))
+        (should (equal display "╭─ c "))
+        (should (eq (get-text-property 2 'face display)
+                    'markdown-ts-appear-code-fence-marker))
+        (dolist (position '(3 4 5))
+          (should
+           (memq 'markdown-ts-appear-label
+                 (get-text-property position 'face display))))
+        (should (eq (get-text-property 6 'face display)
+                    'markdown-ts-appear-code-fence-marker))))))
+
+(ert-deftest markdown-ts-appear-test-renders-callout-label ()
+  (let ((markdown-ts-appear-label-caps '("" . ""))
+        (markdown-ts-appear-render-callouts t))
+    (markdown-ts-appear-test--with-buffer
+        "> [!warning]- `fatal: The remote end hung up unexpectedly`\n"
+      (goto-char (point-min))
+      (search-forward "[!warning]-")
+      (let ((beg (match-beginning 0)))
+        (let ((display (get-text-property beg 'display)))
+          (should (equal display " warning "))
+          (should (eq (get-text-property 0 'face display)
+                      'markdown-ts-appear-block-quote-marker))
+          (dotimes (offset (- (length display) 2))
+            (should
+             (memq 'markdown-ts-appear-label
+                   (get-text-property (1+ offset) 'face display))))
+          (should (eq (get-text-property (1- (length display)) 'face display)
+                      'markdown-ts-appear-block-quote-marker)))
+        (should-not (get-text-property (1- (match-end 0)) 'display))
+        (goto-char (1- (match-end 0)))
+        (markdown-ts-appear--update)
+        (should-not (get-text-property beg 'display))
+        (goto-char (point-max))
+        (markdown-ts-appear--update)
+        (should (equal (get-text-property beg 'display) " warning "))))))
 
 (ert-deftest markdown-ts-appear-test-reveal-and-restore ()
   (markdown-ts-appear-test--with-buffer "**bold** plain\n"

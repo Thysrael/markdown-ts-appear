@@ -61,6 +61,8 @@ displayable and its fallback otherwise.  For example:
 (setq markdown-ts-appear-link-icon '("" . "↗")
       markdown-ts-appear-image-icon '("" . "▧")
       markdown-ts-appear-code-fence-style 'connected
+      markdown-ts-appear-label-caps '("" . "")
+      markdown-ts-appear-render-callouts t
       markdown-ts-appear-block-quote-marker "▎"
       markdown-ts-appear-table-style 'unicode)
 #+end_src
@@ -113,6 +115,12 @@ Evil is optional.  To reveal source only while editing:
 - ~markdown-ts-appear-code-fence-style~ is either ~raw~ or ~connected~ and
   defaults to ~raw~.  The connected style displays ~╭─[ language ]~, prefixes
   code lines with ~│~, and displays ~╰─~ for the closing fence.
+- ~markdown-ts-appear-label-caps~ optionally replaces label brackets with left
+  and right strings such as ~("" . "")~.  Label text uses inverse video while
+  the caps use its background color as their foreground, forming one shape.
+- ~markdown-ts-appear-render-callouts~ recognizes callout markers such as
+  ~[!WARNING]-~ at the start of block quotes.  Callout and code-language labels
+  use inverse video, but callout folding is not implemented.
 - ~markdown-ts-appear-block-quote-marker~ controls the marker displayed on each
   quoted line and defaults to nil.
 - ~markdown-ts-appear-table-style~ is either ~raw~ or ~unicode~ and defaults to

@@ -129,6 +129,21 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                   (const :tag "Connected Unicode lines" connected))
   :group 'markdown-ts-appear)
 
+(defcustom markdown-ts-appear-label-caps nil
+  "Left and right strings surrounding rendered labels.
+When nil, code languages use brackets and callouts retain their source
+brackets.  Powerline users can set this to a cons such as (\"\" . \"\")."
+  :type '(choice (const :tag "Use brackets" nil)
+                  (cons :tag "Left and right caps"
+                        (string :tag "Left cap")
+                        (string :tag "Right cap")))
+  :group 'markdown-ts-appear)
+
+(defcustom markdown-ts-appear-render-callouts nil
+  "Whether to render callout labels at the start of block quotes."
+  :type 'boolean
+  :group 'markdown-ts-appear)
+
 (defcustom markdown-ts-appear-block-quote-marker nil
   "Marker replacing each marker of a rendered block quote.
 The value has the same form as `markdown-ts-appear-link-icon'."
@@ -148,6 +163,11 @@ The value has the same form as `markdown-ts-appear-link-icon'."
 (defface markdown-ts-appear-code-fence-marker
   '((t :inherit (markdown-ts-language-keyword markdown-ts-code-block)))
   "Face used for rendered fenced code block markers."
+  :group 'markdown-ts-appear)
+
+(defface markdown-ts-appear-label
+  '((t :inverse-video t))
+  "Face used to invert rendered code language and callout labels."
   :group 'markdown-ts-appear)
 
 (defface markdown-ts-appear-block-quote
@@ -305,6 +325,16 @@ The value has the same form as `markdown-ts-appear-link-icon'."
       (add-text-properties
        beg end `(line-prefix ,display wrap-prefix ,display
                  markdown-ts-appear--decoration t)))))
+
+(defun markdown-ts-appear--label (text bracketed face)
+  "Render TEXT or BRACKETED as an inverse-video label over FACE."
+  (let ((label-face (list 'markdown-ts-appear-label face)))
+    (if-let* ((caps markdown-ts-appear-label-caps))
+        (concat
+         (propertize (car caps) 'face face)
+         (propertize (concat " " text " ") 'face label-face)
+         (propertize (cdr caps) 'face face))
+      (propertize bracketed 'face label-face))))
 
 (defun markdown-ts-appear--code-quote-prefix (source)
   "Render quoted code prefix SOURCE followed by a code block marker."
@@ -601,10 +631,40 @@ The value has the same form as `markdown-ts-appear-link-icon'."
     (when marker
       (cons (treesit-node-start marker) (treesit-node-end marker)))))
 
+(defun markdown-ts-appear--callout-data (quote)
+  "Return (BEG END TYPE) for a callout marker starting block QUOTE."
+  (when-let* ((opening
+               (markdown-ts-appear--first-direct-child-of-type
+                quote "block_quote_marker"))
+              (beg (treesit-node-end opening)))
+    (save-excursion
+      (goto-char beg)
+      (let ((case-fold-search t))
+        (when (re-search-forward
+               "\\=\\[!\\([[:alnum:]_-]+\\)\\]\\([+-]\\)?"
+               (line-end-position) t)
+          (list beg (point) (match-string-no-properties 1)))))))
+
+(defun markdown-ts-appear--callout-bounds-at (position)
+  "Return rendered callout marker bounds containing POSITION."
+  (when (and markdown-ts-appear-render-callouts
+             (markdown-ts-appear--markdown-node-at position))
+    (when-let* ((quote
+                 (markdown-ts-appear--node-ancestor
+                  (markdown-ts-appear--markdown-node-at position)
+                  "block_quote"))
+                (data (markdown-ts-appear--callout-data quote))
+                (beg (nth 0 data))
+                (end (nth 1 data))
+                ((<= beg position))
+                ((< position end)))
+      (cons beg end))))
+
 (defun markdown-ts-appear--bounds ()
   "Return source bounds for the smallest rendered element at point."
   (let ((pos (point)))
     (or (markdown-ts-appear--fence-bounds-at pos)
+        (markdown-ts-appear--callout-bounds-at pos)
         (markdown-ts-appear--quote-marker-bounds-at pos)
         (unless (markdown-ts-appear--literal-block-at pos)
           (markdown-ts-appear--bounds-at-point pos)))))
@@ -1102,7 +1162,8 @@ The value has the same form as `markdown-ts-appear-link-icon'."
   (unless markdown-ts-appear--block-font-lock-installed-p
     (let ((settings
            (append
-             (and markdown-ts-appear-block-quote-marker
+             (and (or markdown-ts-appear-block-quote-marker
+                      markdown-ts-appear-render-callouts)
                   markdown-ts-appear--quote-font-lock-settings)
              (and (eq markdown-ts-appear-code-fence-style 'connected)
                   markdown-ts-appear--code-font-lock-settings)
@@ -1290,12 +1351,19 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                (header-end (if info (treesit-node-end info)
                              (treesit-node-end node))))
           (when (<= header-end limit)
-            (markdown-ts-appear--decorate
-             (treesit-node-start node) (treesit-node-end node)
-             (if info
-                 (format "╭─[ %s ]" (treesit-node-text info t))
-               "╭─")
-             'markdown-ts-appear-code-fence-marker)
+            (let ((display
+                   (if info
+                       (let ((language (treesit-node-text info t)))
+                          (concat
+                           (propertize
+                            "╭─" 'face 'markdown-ts-appear-code-fence-marker)
+                          (markdown-ts-appear--label
+                           language (format "[ %s ]" language)
+                           'markdown-ts-appear-code-fence-marker)))
+                     "╭─")))
+              (markdown-ts-appear--decorate
+               (treesit-node-start node) (treesit-node-end node)
+               display (unless info 'markdown-ts-appear-code-fence-marker)))
             (when (< (treesit-node-end node) header-end)
               (markdown-ts-appear--decorate
                (treesit-node-end node) header-end "" nil))))
@@ -1388,6 +1456,25 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                          marker-beg marker-end display nil)))))
                 (forward-line 1))))))))))
 
+(defun markdown-ts-appear--fontify-callout (node start limit)
+  "Render a callout label at the start of block quote NODE in START to LIMIT."
+  (when markdown-ts-appear-render-callouts
+    (when-let* ((data (markdown-ts-appear--callout-data node))
+                (beg (nth 0 data))
+                (end (nth 1 data))
+                (label-end
+                 (if (memq (char-before end) '(?+ ?-)) (1- end) end))
+                ((<= start beg))
+                ((<= label-end limit))
+                ((not (markdown-ts-appear--region-visible-p beg end))))
+      (markdown-ts-appear--decorate
+       beg label-end
+       (markdown-ts-appear--label
+        (nth 2 data)
+        (buffer-substring-no-properties beg label-end)
+        'markdown-ts-appear-block-quote-marker)
+       nil))))
+
 (defun markdown-ts-appear--fontify-quote-marker (node visible-p start limit)
   "Render quote marker NODE between START and LIMIT unless VISIBLE-P."
   (when-let* (((not visible-p))
@@ -1461,6 +1548,7 @@ The value has the same form as `markdown-ts-appear-link-icon'."
         (add-face-text-property
          (max beg start) (min end limit)
          'markdown-ts-appear-block-quote t))
+      (markdown-ts-appear--fontify-callout node start limit)
       (when marker
         (save-excursion
           (goto-char (max beg start))
