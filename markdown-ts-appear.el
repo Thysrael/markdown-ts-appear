@@ -1663,8 +1663,8 @@ The value has the same form as `markdown-ts-appear-link-icon'."
     (save-excursion
       (goto-char (max start (treesit-node-start node)))
       (while (search-forward "\n" (min limit (treesit-node-end node)) t)
-        (add-face-text-property
-         (1- (point)) (point) 'markdown-ts-appear-table-line-end)))
+        (put-text-property
+         (1- (point)) (point) 'face 'markdown-ts-appear-table-line-end)))
     (dolist (row (markdown-ts-appear--table-rows-in-range node start limit))
       (markdown-ts-appear--fontify-table-row row start limit))))
 

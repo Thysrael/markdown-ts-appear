@@ -1290,9 +1290,8 @@
    "| A | B |\n|---|---|\n| 1 | 2 |\n"
    (goto-char (point-min))
    (let ((line-end (line-end-position)))
-     (should
-      (memq 'markdown-ts-appear-table-line-end
-            (get-text-property line-end 'face)))
+     (should (eq (get-text-property line-end 'face)
+                 'markdown-ts-appear-table-line-end))
      (should-not
       (memq 'markdown-ts-appear-table-line-end
             (get-text-property (1- line-end) 'face))))))
