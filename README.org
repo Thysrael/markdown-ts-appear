@@ -26,16 +26,16 @@ renders LaTeX fragments asynchronously.
 - An interface made from characters, not browser-like widgets
 - Optional decorations for links, code fences, quotes, callouts, and tables
 - Optional asynchronous LaTeX preview through MathJax
-- Insert-state-aware reveal for Evil and Meow
+- Public controls for pausing and resuming point tracking
 
 * Requirements
 
 - Emacs 31.1 or newer
 - The ~markdown~ and ~markdown-inline~ Tree-sitter grammars
 
-Math preview is disabled by default.  It additionally requires the optional
-~mathjax~ Emacs package and Node.js, neither of which is installed by this
-package.  Preview is attempted only in a graphical SVG-capable session.
+Math preview defaults to enabled when the optional ~mathjax~ Emacs package is
+already installed.  It also requires Node.js; neither dependency is installed
+by this package.  Preview is attempted only in a graphical SVG-capable session.
 
 * Installation
 
@@ -73,7 +73,6 @@ displayable and otherwise falls back to the second.
 
 Key options:
 
-- ~markdown-ts-appear-trigger~: reveal always, or only in Evil/Meow insert state.
 - ~markdown-ts-appear-link-icon~, ~markdown-ts-appear-image-icon~, and
   ~markdown-ts-appear-wikilink-icon~: add link prefix icons.
 - ~markdown-ts-appear-code-fence-style~: use raw fences or connected Unicode
@@ -90,19 +89,18 @@ options in an active buffer.
 
 * Math Preview
 
-Install and opt into the optional MathJax integration separately:
+Install the optional MathJax integration separately:
 
 #+begin_src emacs-lisp
 (use-package mathjax
   :ensure t
   :defer t)
-
-(setq markdown-ts-appear-enable-math-preview t)
 #+end_src
 
-If the option is enabled without ~mathjax~, the main appear mode remains active
-and reports that math preview is unavailable.  Re-enable the main mode after
-installing ~mathjax~ or changing this option.
+Set ~markdown-ts-appear-enable-math-preview~ to nil to disable preview.  If it is
+enabled without ~mathjax~, the main reveal mode remains active and reports that
+math preview is unavailable.  Re-enable the main mode after installing
+~mathjax~ or changing this option.
 
 Related options are ~markdown-ts-appear-math-timeout~,
 ~markdown-ts-appear-center-display-math~, and ~markdown-ts-appear-math-scale~.
@@ -110,22 +108,18 @@ Related options are ~markdown-ts-appear-math-timeout~,
 To render image files themselves, also enable the built-in
 ~markdown-ts-inline-images~ option or run ~markdown-ts-toggle-inline-images~.
 
-* Modal Editors
+* Tracking Control
 
-Evil and Meow are optional.  To reveal source only while editing, select the
-corresponding insert-state trigger:
+The mode tracks point whenever it is enabled.  External modal-editor
+configuration can call ~markdown-ts-appear-stop~ and
+~markdown-ts-appear-start~ to pause and resume tracking; the package contains
+no Evil- or Meow-specific integration.
 
-For Evil:
+* Limitations
 
-#+begin_src emacs-lisp
-(setq markdown-ts-appear-trigger 'evil-insert)
-#+end_src
-
-For Meow:
-
-#+begin_src emacs-lisp
-(setq markdown-ts-appear-trigger 'meow-insert)
-#+end_src
+Indirect buffers are unsupported.  Enable ~markdown-ts-appear-mode~ only in a
+base buffer.  A newly created clone is detached from active tracking, but its
+display and edits are not synchronized with the base buffer.
 
 * Demo
 

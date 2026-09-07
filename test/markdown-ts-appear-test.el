@@ -36,7 +36,7 @@
 
 (defconst markdown-ts-appear-test--source-file
   (expand-file-name
-   "markdown-ts-appear.el"
+    "markdown-ts-appear.el"
    (file-name-directory
     (directory-file-name
      (file-name-directory (or load-file-name buffer-file-name)))))
@@ -60,7 +60,6 @@
        (insert ,content)
        (let ((treesit-font-lock-level 3)
              (markdown-ts-appear-enable-math-preview nil)
-             (markdown-ts-appear-trigger 'always)
              (markdown-ts-appear-link-icon
               (and markdown-ts-appear-test--decorations "[link]"))
              (markdown-ts-appear-image-icon
@@ -99,8 +98,21 @@
       (text-property-not-all beg end 'display nil)
       (text-property-any beg end 'line-height 0)))
 
-(ert-deftest markdown-ts-appear-test-mathjax-is-opt-in ()
-  (should-not (default-value 'markdown-ts-appear-enable-math-preview))
+(defun markdown-ts-appear-test--make-math-ticket
+    (beg end key source token)
+  "Create a package math ticket from BEG to END for KEY, SOURCE, and TOKEN."
+  (let ((ticket (make-overlay beg end)))
+    (overlay-put ticket 'markdown-ts-appear--math-ticket t)
+    (overlay-put ticket 'markdown-ts-appear--math-key key)
+    (overlay-put ticket 'markdown-ts-appear--math-source source)
+    (overlay-put ticket 'markdown-ts-appear--math-token token)
+    ticket))
+
+(ert-deftest markdown-ts-appear-test-mathjax-default-follows-installation ()
+  (should
+   (eq (not (null (default-value
+                   'markdown-ts-appear-enable-math-preview)))
+       (not (null (package-installed-p 'mathjax)))))
   (should-not
    (assq 'mathjax
          (lm-package-requires markdown-ts-appear-test--source-file))))
@@ -454,85 +466,30 @@
     (should markdown-ts-hide-markup)
     (should (local-variable-p 'markdown-ts-hide-markup))))
 
-(ert-deftest markdown-ts-appear-test-restores-clone-hide-markup-locality ()
+(ert-deftest markdown-ts-appear-test-rejects-indirect-buffer ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
   (with-temp-buffer
     (insert "**bold**\n")
-    (let ((markdown-ts-appear-enable-math-preview nil)
-          clone)
-      (markdown-ts-mode)
-      (should-not (local-variable-p 'markdown-ts-hide-markup))
-      (setq clone (clone-indirect-buffer " *markdown-locality-clone*" nil))
+    (markdown-ts-mode)
+    (let ((clone (clone-indirect-buffer " *markdown-reveal-clone*" nil)))
       (unwind-protect
-          (progn
-            (with-current-buffer clone
-              (should-not (local-variable-p 'markdown-ts-hide-markup)))
-            (markdown-ts-appear-mode 1)
-            (should (local-variable-p 'markdown-ts-hide-markup))
-            (with-current-buffer clone
-              (should (local-variable-p 'markdown-ts-hide-markup)))
-            (markdown-ts-appear-mode -1)
-            (should-not (local-variable-p 'markdown-ts-hide-markup))
-            (with-current-buffer clone
-              (should-not (local-variable-p 'markdown-ts-hide-markup))))
-        (when markdown-ts-appear--setup-p
-          (markdown-ts-appear-mode -1))
-        (when (buffer-live-p clone)
-          (kill-buffer clone))))))
+          (with-current-buffer clone
+            (should-error (markdown-ts-appear-mode 1) :type 'user-error)
+            (should-not markdown-ts-appear-mode)
+            (should-not markdown-ts-appear--setup-p))
+        (kill-buffer clone)))))
 
-(ert-deftest markdown-ts-appear-test-meow-trigger-follows-insert-hooks ()
-  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
-  (with-temp-buffer
-    (insert "A *word* here\n")
-    (markdown-ts-mode)
-    (setq-local markdown-ts-appear-trigger 'meow-insert)
-    (setq-local markdown-ts-appear-enable-math-preview nil)
-    (setq-local meow-insert-enter-hook nil)
-    (setq-local meow-insert-exit-hook nil)
-    (setq-local meow-insert-mode nil)
-    (unwind-protect
-        (progn
-          (markdown-ts-appear-mode 1)
-          (goto-char 5)
-          (should-not
-           (memq #'markdown-ts-appear--update post-command-hook))
-          (should
-           (memq #'markdown-ts-appear--start meow-insert-enter-hook))
-          (should
-           (memq #'markdown-ts-appear--stop meow-insert-exit-hook))
-          (run-hooks 'meow-insert-enter-hook)
-          (should (memq #'markdown-ts-appear--update post-command-hook))
-          (should markdown-ts-appear--region)
-          (run-hooks 'meow-insert-exit-hook)
-          (should-not
-           (memq #'markdown-ts-appear--update post-command-hook))
-          (should-not markdown-ts-appear--region)
-          (markdown-ts-appear-mode -1)
-          (should-not
-           (memq #'markdown-ts-appear--start meow-insert-enter-hook))
-          (should-not
-           (memq #'markdown-ts-appear--stop meow-insert-exit-hook)))
-      (when markdown-ts-appear--setup-p
-        (markdown-ts-appear-mode -1)))))
-
-(ert-deftest markdown-ts-appear-test-meow-trigger-starts-in-insert-state ()
-  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
-  (with-temp-buffer
-    (insert "A *word* here\n")
-    (markdown-ts-mode)
-    (setq-local markdown-ts-appear-trigger 'meow-insert)
-    (setq-local markdown-ts-appear-enable-math-preview nil)
-    (setq-local meow-insert-enter-hook nil)
-    (setq-local meow-insert-exit-hook nil)
-    (setq-local meow-insert-mode t)
-    (unwind-protect
-        (progn
-          (goto-char 5)
-          (markdown-ts-appear-mode 1)
-          (should (memq #'markdown-ts-appear--update post-command-hook))
-          (should markdown-ts-appear--region))
-      (when markdown-ts-appear--setup-p
-        (markdown-ts-appear-mode -1)))))
+(ert-deftest markdown-ts-appear-test-public-tracking-controls ()
+  (markdown-ts-appear-test--with-buffer "A *word* here\n"
+    (goto-char 5)
+    (markdown-ts-appear--update)
+    (should markdown-ts-appear--region)
+    (markdown-ts-appear-stop)
+    (should-not (memq #'markdown-ts-appear--update post-command-hook))
+    (should-not markdown-ts-appear--region)
+    (markdown-ts-appear-start)
+    (should (memq #'markdown-ts-appear--update post-command-hook))
+    (should markdown-ts-appear--region)))
 
 (ert-deftest markdown-ts-appear-test-restores-setext-line-height ()
   (markdown-ts-appear-test--with-buffer "Title\n=====\n"
@@ -696,7 +653,6 @@
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
   (with-temp-buffer
     (let ((markdown-ts-appear-enable-math-preview nil)
-          (markdown-ts-appear-trigger 'always)
           (markdown-ts-appear-link-icon "[link]")
           (markdown-ts-inline-images nil))
       (markdown-ts-mode)
@@ -705,7 +661,7 @@
             (markdown-ts-appear-mode 1)
             (insert "plain\n[Emacs](https://www.gnu.org/)`")
             (font-lock-ensure)
-            (should markdown-ts-appear--inline-parser-notified-p)
+            (should (markdown-ts-appear--inline-parser-notified-p))
             (should
              (seq-some
               (lambda (overlay)
@@ -724,357 +680,71 @@
 
 (ert-deftest markdown-ts-appear-test-cleans-up-before-major-mode-change ()
   (markdown-ts-appear-test--with-buffer "[Emacs](https://www.gnu.org/)\n"
-					(with-silent-modifications
-					  (put-text-property
-					   (point-min) (1+ (point-min)) 'display 'math-image)
-					  (put-text-property
-					   (point-min) (1+ (point-min))
-					   'markdown-ts-appear--math-state 'rendered))
-					(should markdown-ts-appear--setup-p)
-					(text-mode)
-					(should-not (get-text-property (point-min) 'display))
-					(should-not
-					 (get-text-property
-					  (point-min) 'markdown-ts-appear--math-state))
-					(should-not
-					 (seq-some
-					  (lambda (overlay)
-					    (or (overlay-get overlay 'markdown-ts-appear--link-icon)
-						(overlay-get overlay 'markdown-ts-appear--image-label)
-						(overlay-get overlay 'markdown-ts-appear--math-alignment)))
-					  (overlays-in (point-min) (point-max))))))
+    (let ((math-overlay
+           (make-overlay (point-min) (1+ (point-min)) (current-buffer))))
+      (overlay-put math-overlay 'markdown-ts-appear--math-ticket t)
+      (overlay-put math-overlay 'display 'math-image)
+      (should markdown-ts-appear--setup-p)
+      (text-mode)
+      (should-not markdown-ts-appear--setup-p)
+      (should-not
+       (seq-some
+        (lambda (overlay)
+          (or (overlay-get overlay 'markdown-ts-appear--image-label)
+              (overlay-get overlay 'markdown-ts-appear--link-icon)
+              (overlay-get overlay 'markdown-ts-appear--math-ticket)))
+        (overlays-in (point-min) (point-max)))))))
 
 (ert-deftest markdown-ts-appear-test-detaches-indirect-clone ()
-  (let ((entry-bound-p (boundp 'evil-insert-state-entry-hook))
-        (entry-value (and (boundp 'evil-insert-state-entry-hook)
-                          evil-insert-state-entry-hook))
-        (exit-bound-p (boundp 'evil-insert-state-exit-hook))
-        (exit-value (and (boundp 'evil-insert-state-exit-hook)
-                         evil-insert-state-exit-hook)))
-    (unwind-protect
-        (progn
-          (makunbound 'evil-insert-state-entry-hook)
-          (makunbound 'evil-insert-state-exit-hook)
-          (markdown-ts-appear-test--with-buffer "**bold** plain\n"
-						(goto-char 3)
-						(markdown-ts-appear--update)
-						(let ((region markdown-ts-appear--region)
-						      (clone
-						       (clone-indirect-buffer " *markdown-appear-clone*" nil)))
-						  (unwind-protect
-						      (progn
-							(with-current-buffer clone
-							  (should-not markdown-ts-appear-mode)
-							  (should-not markdown-ts-appear--setup-p)
-							  (should-not markdown-ts-appear--region)
-							  (should-not
-							   (memq #'markdown-ts-appear--update post-command-hook))
-							  (font-lock-flush)
-							  (font-lock-ensure))
-							(should (marker-position (car region)))
-							(should (marker-position (cdr region)))
-							(should-not (get-text-property (point-min) 'invisible)))
-						    (kill-buffer clone)))))
-      (if entry-bound-p
-          (set 'evil-insert-state-entry-hook entry-value)
-        (makunbound 'evil-insert-state-entry-hook))
-      (if exit-bound-p
-          (set 'evil-insert-state-exit-hook exit-value)
-        (makunbound 'evil-insert-state-exit-hook)))))
-
-(ert-deftest markdown-ts-appear-test-cleans-indirect-clone-overlays ()
-  (markdown-ts-appear-test--with-buffer
-   "[Emacs](https://www.gnu.org/)\n"
-   (let ((clone (clone-indirect-buffer " *markdown-appear-clone*" nil)))
-     (unwind-protect
-         (progn
-           (with-current-buffer clone
-             (font-lock-flush)
-             (font-lock-ensure)
-             (should
-              (seq-some
-               (lambda (overlay)
-                 (overlay-get overlay 'markdown-ts-appear--link-icon))
-               (overlays-in (point-min) (point-max)))))
-           (markdown-ts-appear-mode -1)
-           (should-not markdown-ts-appear--indirect-clones)
-           (with-current-buffer clone
-             (should-not markdown-ts-appear--base-owner)
-             (should-not
-              (memq #'markdown-ts-appear--after-change
-                    after-change-functions))
-             (should-not
-              (memq #'markdown-ts-appear--math-preview-owner-window
-                    window-buffer-change-functions))
-             (font-lock-flush)
-             (font-lock-ensure)
-             (should-not (get-text-property (point-min) 'invisible))
-             (should-not
-              (seq-some
-               (lambda (overlay)
-                 (overlay-get overlay 'markdown-ts-appear--link-icon))
-               (overlays-in (point-min) (point-max))))))
-       (kill-buffer clone)))))
+  (markdown-ts-appear-test--with-buffer "**bold** plain\n"
+    (goto-char 3)
+    (markdown-ts-appear--update)
+    (let ((region markdown-ts-appear--region)
+          (clone (clone-indirect-buffer " *markdown-reveal-clone*" nil)))
+      (unwind-protect
+          (progn
+            (with-current-buffer clone
+              (should-not markdown-ts-appear-mode)
+              (should-not markdown-ts-appear--setup-p)
+              (should-not markdown-ts-appear--region)
+              (should-not
+               (memq #'markdown-ts-appear--update post-command-hook))
+              (should-not
+               (memq #'markdown-ts-appear--after-change
+                     after-change-functions)))
+            (should markdown-ts-appear-mode)
+            (should markdown-ts-appear--setup-p)
+            (should (marker-position (car region)))
+            (should (marker-position (cdr region))))
+        (kill-buffer clone)))))
 
 (ert-deftest markdown-ts-appear-test-teardown-survives-deleted-parser ()
   (markdown-ts-appear-test--with-buffer
    "[Emacs](https://www.gnu.org/)\n"
-   (let ((clone (clone-indirect-buffer " *markdown-deleted-parser*" nil)))
-     (unwind-protect
-         (cl-letf (((symbol-function 'font-lock-ensure)
-                    (lambda (&rest _arguments)
-                      (signal 'treesit-parser-deleted nil))))
-           (markdown-ts-appear-mode -1)
-           (should-not markdown-ts-appear--setup-p)
-           (should-not markdown-ts-appear--indirect-clones)
-           (with-current-buffer clone
-             (should-not markdown-ts-appear--base-owner)))
-       (kill-buffer clone)))))
+   (cl-letf (((symbol-function 'font-lock-ensure)
+              (lambda (&rest _arguments)
+                (signal 'treesit-parser-deleted nil))))
+     (markdown-ts-appear-mode -1))
+   (should-not markdown-ts-appear--setup-p)))
 
-(ert-deftest markdown-ts-appear-test-invalidates-clone-overlays-after-edit ()
-  (markdown-ts-appear-test--with-buffer
-   "[Emacs](https://www.gnu.org/)\n"
-   (let ((clone (clone-indirect-buffer " *markdown-appear-clone*" nil)))
-     (unwind-protect
-         (progn
-           (with-current-buffer clone
-             (font-lock-flush)
-             (font-lock-ensure)
-             (should
-              (seq-some
-               (lambda (overlay)
-                 (overlay-get overlay 'markdown-ts-appear--link-icon))
-               (overlays-in (point-min) (point-max))))
-             (erase-buffer)
-             (insert "plain\n"))
-           (should-not
-            (seq-some
-             (lambda (overlay)
-               (overlay-get overlay 'markdown-ts-appear--link-icon))
-             (overlays-in (point-min) (point-max))))
-           (with-current-buffer clone
-             (should-not
-              (seq-some
-               (lambda (overlay)
-                 (overlay-get overlay 'markdown-ts-appear--link-icon))
-               (overlays-in (point-min) (point-max))))))
-       (kill-buffer clone)))))
-
-(ert-deftest markdown-ts-appear-test-clone-major-mode-change-disables-base ()
-  (markdown-ts-appear-test--with-buffer "**bold**\n"
-					(let ((clone (clone-indirect-buffer " *markdown-appear-clone*" nil)))
-					  (unwind-protect
-					      (progn
-						(should (memq clone markdown-ts-appear--indirect-clones))
-						(with-current-buffer clone
-						  (text-mode))
-						(should-not markdown-ts-appear-mode)
-						(should-not markdown-ts-appear--setup-p)
-						(should-not markdown-ts-appear--indirect-clones)
-						(should-not (get-text-property (point-min) 'invisible))
-						(with-current-buffer clone
-						  (should-not markdown-ts-appear--base-owner)))
-					    (when (buffer-live-p clone)
-					      (kill-buffer clone))))))
-
-(ert-deftest markdown-ts-appear-test-adopts-existing-indirect-clone ()
+(ert-deftest markdown-ts-appear-test-teardown-continues-after-error ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
   (with-temp-buffer
-    (insert "**bold**\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")
-    (let ((markdown-ts-appear-enable-math-preview nil)
-          (markdown-ts-appear-block-quote-marker "▎")
-          (markdown-ts-appear-table-style 'unicode)
-          (clone nil))
-      (markdown-ts-mode)
-      (setq clone (clone-indirect-buffer " *markdown-existing-clone*" nil))
-      (with-current-buffer clone
-        (setq markdown-ts-hide-markup t)
-        (setq-local markdown-ts-appear-block-quote-marker nil)
-        (setq-local markdown-ts-appear-table-style 'raw)
-        (add-to-list 'font-lock-extra-managed-props 'line-height))
-      (unwind-protect
-          (progn
-            (markdown-ts-appear-mode 1)
-            (should (memq clone markdown-ts-appear--indirect-clones))
-            (font-lock-ensure)
-            (goto-char (point-min))
-            (search-forward "| A")
-            (let ((pipe-position (match-beginning 0)))
-              (should (equal (get-text-property pipe-position 'display) "│"))
-              (with-current-buffer clone
-                (should (eq markdown-ts-appear--base-owner
-                            (buffer-base-buffer)))
-                (should-not markdown-ts-appear--block-font-lock-installed-p)
-                (should markdown-ts-appear--decoration-filter-installed-p)
-                (should-not
-                 (memq 'markdown-ts-appear--decoration
-                       font-lock-extra-managed-props))
-                (font-lock-flush)
-                (font-lock-ensure)
-                (should (get-text-property (point-min) 'invisible))
-                (should (equal (get-text-property pipe-position 'display)
-                               "│"))
-                (goto-char (point-min))
-                (search-forward "1")
-                (replace-match "2" t t)
-                (beginning-of-line)
-                (should (equal (get-text-property (point) 'display) "│"))))
-            (markdown-ts-appear-mode -1)
-            (with-current-buffer clone
-              (should markdown-ts-hide-markup)
-              (should (local-variable-p 'markdown-ts-hide-markup))
-              (should (memq 'line-height font-lock-extra-managed-props))))
-        (when markdown-ts-appear--setup-p
-          (markdown-ts-appear-mode -1))
-        (when (buffer-live-p clone)
-          (kill-buffer clone))))))
-
-(ert-deftest markdown-ts-appear-test-graphical-clone-enables-base-math ()
-  (markdown-ts-appear-test--with-buffer "$x$\n"
-					(let ((original-require (symbol-function 'require))
-					      (window (selected-window))
-					      (previous-buffer (window-buffer (selected-window)))
-					      (clone (clone-indirect-buffer " *markdown-math-window*" nil)))
-					  (unwind-protect
-					      (let ((markdown-ts-appear-enable-math-preview t))
-						(cl-letf (((symbol-function 'require)
-							   (lambda (feature &optional filename noerror)
-							     (if (eq feature 'mathjax)
-								 t
-							       (funcall original-require
-									feature filename noerror))))
-							  ((symbol-function 'display-graphic-p)
-							   (lambda (&optional display)
-							     (eq display (window-frame window))))
-							  ((symbol-function 'image-type-available-p)
-							   (lambda (_type) t))
-							  ((symbol-function 'mathjax-available-p)
-							   (lambda () t)))
-						  (set-window-buffer window clone)
-						  (with-current-buffer clone
-						    (markdown-ts-appear--math-preview-owner-window window))
-						  (should markdown-ts-appear--math-preview-active-p)
-						  (with-current-buffer clone
-						    (should markdown-ts-appear--math-filter-installed-p)
-						    (should (memq 'markdown-ts-appear--math-state
-								  font-lock-extra-managed-props)))))
-					    (when (window-live-p window)
-					      (set-window-buffer window previous-buffer))
-					    (when (buffer-live-p clone)
-					      (kill-buffer clone))))))
-
-(ert-deftest markdown-ts-appear-test-existing-graphical-clone-enables-math ()
-  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
-  (let ((original-require (symbol-function 'require))
-        (window (selected-window))
-        (previous-buffer (window-buffer (selected-window)))
-        (base (generate-new-buffer " *markdown-math-base*"))
-        clone)
-    (unwind-protect
-        (progn
-          (with-current-buffer base
-            (insert "$x$\n")
-            (markdown-ts-mode)
-            (setq clone
-                  (clone-indirect-buffer " *markdown-existing-window*" nil)))
-          (set-window-buffer window clone)
-          (cl-letf (((symbol-function 'require)
-                     (lambda (feature &optional filename noerror)
-                       (if (eq feature 'mathjax)
-                           t
-                         (funcall original-require feature filename noerror))))
-                    ((symbol-function 'display-graphic-p)
-                     (lambda (&optional display)
-                       (eq display (window-frame window))))
-                    ((symbol-function 'image-type-available-p)
-                     (lambda (_type) t))
-                    ((symbol-function 'mathjax-available-p)
-                     (lambda () t)))
-            (with-current-buffer base
-              (let ((markdown-ts-appear-enable-math-preview t))
-                (markdown-ts-appear-mode 1))
-              (should markdown-ts-appear--math-preview-active-p))))
-      (when (window-live-p window)
-        (set-window-buffer window previous-buffer))
-      (when (buffer-live-p base)
-        (with-current-buffer base
-          (when markdown-ts-appear--setup-p
-            (markdown-ts-appear-mode -1))))
-      (when (buffer-live-p clone)
-        (kill-buffer clone))
-      (when (buffer-live-p base)
-        (kill-buffer base)))))
-
-(ert-deftest markdown-ts-appear-test-clone-refontification-restores-math ()
-  (markdown-ts-appear-test--with-buffer "$$x$$\n"
-					(let ((original-require (symbol-function 'require))
-					      (original-request
-					       (symbol-function 'markdown-ts-appear--math-request))
-					      (original-display-result
-					       (symbol-function 'markdown-ts-appear--math-display-result))
-					      (markdown-ts-appear--math-cache (make-hash-table :test #'equal))
-					      clone request-buffer request-owner)
-					  (puthash '(t 1.1 "x")
-						   '((svg . "<svg width=\"1ex\" height=\"1ex\"></svg>")
-						     (markdown-ts-appear--math-image . test-image))
-						   markdown-ts-appear--math-cache)
-					  (cl-letf (((symbol-function 'require)
-						     (lambda (feature &optional filename noerror)
-						       (if (eq feature 'mathjax)
-							   t
-							 (funcall original-require feature filename noerror))))
-						    ((symbol-function 'display-graphic-p)
-						     (lambda (&optional _display) t))
-						    ((symbol-function 'image-type-available-p)
-						     (lambda (_type) t))
-						    ((symbol-function 'mathjax-available-p)
-						     (lambda () t))
-						    ((symbol-function 'markdown-ts-appear--math-request)
-						     (lambda (&rest arguments)
-						       (setq request-buffer (current-buffer))
-						       (apply original-request arguments)))
-						    ((symbol-function
-						      'markdown-ts-appear--math-display-result)
-						     (lambda (request data)
-						       (setq request-owner (car request))
-						       (funcall original-display-result request data))))
-					    (unwind-protect
-						(progn
-						  (setq clone
-							(clone-indirect-buffer " *markdown-math-clone*" nil))
-						  (markdown-ts-appear--math-enable)
-						  (with-current-buffer clone
-						    (should markdown-ts-appear--math-filter-installed-p)
-						    (should (memq 'markdown-ts-appear--math-state
-								  font-lock-extra-managed-props)))
-						  (font-lock-ensure)
-						  (should (eq (get-text-property (point-min) 'display)
-							      'test-image))
-						  (setq request-buffer nil)
-						  (setq request-owner nil)
-						  (with-current-buffer clone
-						    (should (markdown-ts-appear--math-active-p))
-						    (font-lock-flush)
-						    (font-lock-ensure))
-						  (should (eq request-buffer clone))
-						  (should (eq request-owner (current-buffer)))
-						  (should (eq (get-text-property (point-min) 'display)
-							      'test-image))
-						  (should
-						   (seq-some
-						    (lambda (overlay)
-						      (overlay-get overlay
-								   'markdown-ts-appear--math-alignment))
-						    (overlays-in (point-min) (point-max))))
-						  (with-current-buffer clone
-						    (should
-						     (seq-some
-						      (lambda (overlay)
-							(overlay-get overlay
-								     'markdown-ts-appear--math-alignment))
-						      (overlays-in (point-min) (point-max))))))
-					      (when (buffer-live-p clone)
-						(kill-buffer clone)))))))
+    (insert "**bold**\n")
+    (markdown-ts-mode)
+    (let ((markdown-ts-appear-enable-math-preview nil))
+      (markdown-ts-appear-mode 1))
+    (cl-letf (((symbol-function 'font-lock-ensure)
+               (lambda (&rest _arguments) (error "Fontification failed"))))
+      (should-error (markdown-ts-appear-mode -1) :type 'error))
+    (should-not markdown-ts-appear-mode)
+    (should-not markdown-ts-appear--setup-p)
+    (should-not markdown-ts-hide-markup)
+    (should-not markdown-ts-appear--block-font-lock-settings)
+    (should-not markdown-ts-appear--decoration-filter-installed-p)
+    (should-not (memq 'line-height font-lock-extra-managed-props))
+    (should-not (memq #'markdown-ts-appear--update post-command-hook))
+    (should-not (markdown-ts-appear--advice-installed-p))))
 
 (ert-deftest markdown-ts-appear-test-shows-empty-image-label ()
   (markdown-ts-appear-test--with-buffer "![](images/demo.gif)\n"
@@ -1191,48 +861,6 @@
       (font-lock-ensure)
       (should-not (get-text-property (1- content-beg) 'line-prefix)))))
 
-(ert-deftest markdown-ts-appear-test-clone-preserves-code-prefix ()
-  (markdown-ts-appear-test--with-buffer "```text\ncontent\n```\n"
-    (goto-char (point-min))
-    (forward-line 1)
-    (let ((content-beg (point))
-          (managed-properties (copy-sequence font-lock-extra-managed-props))
-          (clone (clone-indirect-buffer " *markdown-code-clone*" nil)))
-      (unwind-protect
-          (progn
-            (with-current-buffer clone
-              (should-not (memq 'line-prefix font-lock-extra-managed-props))
-              (font-lock-flush)
-              (font-lock-ensure)
-              (should (equal (get-text-property content-beg 'line-prefix)
-                              "│ ")))
-            (should (equal (get-text-property content-beg 'line-prefix) "│ "))
-            (should (equal font-lock-extra-managed-props managed-properties))
-            (kill-buffer clone)
-            (setq clone nil)
-            (should (equal font-lock-extra-managed-props managed-properties)))
-        (when (buffer-live-p clone)
-          (kill-buffer clone))))))
-
-(ert-deftest markdown-ts-appear-test-clone-edit-clears-stale-code-prefix ()
-  (markdown-ts-appear-test--with-buffer "```text\ncontent\n```\n"
-    (goto-char (point-min))
-    (forward-line 1)
-    (let ((content-beg (copy-marker (point)))
-          (clone (clone-indirect-buffer " *markdown-code-edit-clone*" nil)))
-      (unwind-protect
-          (progn
-            (with-current-buffer clone
-              (goto-char (point-min))
-              (delete-char 1)
-              (font-lock-ensure))
-            (should (equal (treesit-node-type
-                            (treesit-node-at content-beg 'markdown))
-                           "inline"))
-            (should-not (get-text-property content-beg 'line-prefix)))
-        (set-marker content-beg nil)
-        (kill-buffer clone)))))
-
 (ert-deftest markdown-ts-appear-test-renders-code-inside-quote ()
   (markdown-ts-appear-test--with-buffer
       "> ```text\n> git config http.postBuffer 524288000\n> ```\n"
@@ -1288,10 +916,12 @@
 (ert-deftest markdown-ts-appear-test-table-background-stops-at-line-end ()
   (markdown-ts-appear-test--with-buffer
    "| A | B |\n|---|---|\n| 1 | 2 |\n"
-   (goto-char (point-min))
-   (let ((line-end (line-end-position)))
-     (should (eq (get-text-property line-end 'face)
-                 'markdown-ts-appear-table-line-end))
+    (goto-char (point-min))
+    (let ((line-end (line-end-position)))
+      (should (memq 'markdown-ts-appear-table-line-end
+                    (get-text-property line-end 'face)))
+      (should (memq 'markdown-ts-table
+                    (get-text-property line-end 'face)))
      (should-not
       (memq 'markdown-ts-appear-table-line-end
             (get-text-property (1- line-end) 'face))))))
@@ -1368,7 +998,7 @@
      (search-forward "```")
      (search-forward "```")
      (should-not (get-text-property (match-beginning 0) 'display))
-     (should-not markdown-ts-appear--block-font-lock-installed-p)
+     (should-not markdown-ts-appear--block-font-lock-settings)
      (should markdown-ts-appear--decoration-filter-installed-p)
      (should-not
       (seq-some
@@ -1391,19 +1021,27 @@
 					    (overlays-in (point-min) (point-max)))))))
 
 (ert-deftest markdown-ts-appear-test-centers-display-math ()
-  (with-temp-buffer
-    (insert "$$x$$")
-    (let ((image '(image :type svg :data "<svg/>")))
-      (markdown-ts-appear--math-center (point-min) (point-max) image)
-      (let ((overlay
-             (seq-find
-              (lambda (candidate)
-                (overlay-get candidate 'markdown-ts-appear--math-alignment))
-              (overlays-in (point-min) (point-max)))))
-        (should overlay)
-        (should (stringp (overlay-get overlay 'before-string))))
-      (markdown-ts-appear--math-clear (point-min) (point-max))
-      (should-not (overlays-in (point-min) (point-max))))))
+  (markdown-ts-appear-test--with-buffer "$$x$$\n"
+    (pcase-let* ((`(,beg ,end ,math ,display-p)
+                   (markdown-ts-appear--math-node-data
+                    (markdown-ts-appear--math-node-at (point-min))))
+                  (key (markdown-ts-appear--math-key math display-p))
+                  (source (buffer-substring-no-properties beg end))
+                  (token (make-symbol "math"))
+                  (ticket (markdown-ts-appear-test--make-math-ticket
+                           beg end key source token))
+                  (image '(image :type svg :data "<svg/>")))
+      (let ((markdown-ts-appear--math-preview-active-p t)
+            (markdown-ts-appear--region nil))
+        (markdown-ts-appear--math-display-result
+         ticket token key source
+         `((markdown-ts-appear--math-image . ,image))))
+      (should (eq (overlay-get ticket 'display) image))
+      (should (eq (overlay-get ticket 'markdown-ts-appear--math-state)
+                  'rendered))
+      (should (stringp (overlay-get ticket 'before-string)))
+      (markdown-ts-appear--math-clear beg end)
+      (should-not (overlay-buffer ticket)))))
 
 (ert-deftest markdown-ts-appear-test-scales-math-svg ()
   (let ((markdown-ts-appear-math-scale 1.1))
@@ -1439,7 +1077,24 @@
       (should-not markdown-ts-appear-mode)
       (should-not markdown-ts-appear--setup-p)
       (should-not markdown-ts-hide-markup)
-      (should-not markdown-ts-appear--advice-installed-p))))
+      (should-not (markdown-ts-appear--advice-installed-p)))))
+
+(ert-deftest markdown-ts-appear-test-setup-error-rolls-back-main-mode ()
+  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
+  (with-temp-buffer
+    (insert "**bold**\n")
+    (markdown-ts-mode)
+    (let ((markdown-ts-appear-enable-math-preview nil))
+      (cl-letf (((symbol-function
+                  'markdown-ts-appear-start)
+                 (lambda () (error "Setup failed"))))
+        (should-error (markdown-ts-appear-mode 1) :type 'error))
+      (should-not markdown-ts-appear-mode)
+      (should-not markdown-ts-appear--setup-p)
+      (should-not markdown-ts-hide-markup)
+      (should-not
+       (memq #'markdown-ts-appear--after-change after-change-functions))
+      (should-not (markdown-ts-appear--advice-installed-p)))))
 
 (ert-deftest markdown-ts-appear-test-unavailable-mathjax-keeps-main-mode-active ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
@@ -1477,6 +1132,7 @@
     (insert "$x$\n")
     (markdown-ts-mode)
     (let ((markdown-ts-appear-enable-math-preview nil)
+          (original-add-hook (symbol-function 'add-hook))
           warning)
       (unwind-protect
           (progn
@@ -1490,18 +1146,22 @@
                          (eq feature 'mathjax)))
                       ((symbol-function 'mathjax-available-p)
                        (lambda () t))
-                      ((symbol-function
-                        'markdown-ts-appear--math-install-clone-filters)
-                       (lambda () (error "Deferred setup failed")))
+                      ((symbol-function 'add-hook)
+                       (lambda (hook function &rest arguments)
+                         (if (eq hook 'outline-view-change-hook)
+                             (error "Deferred setup failed")
+                           (apply original-add-hook
+                                  hook function arguments))))
                       ((symbol-function 'display-warning)
                        (lambda (_type message &rest _arguments)
                          (setq warning message))))
               (should-not (markdown-ts-appear--math-enable))
               (should-not markdown-ts-appear--math-preview-active-p)
-              (should-not markdown-ts-appear--math-filter-installed-p)
               (should-not
-               (memq 'markdown-ts-appear--math-state
-                     font-lock-extra-managed-props))
+               (seq-some
+                (lambda (overlay)
+                  (overlay-get overlay 'markdown-ts-appear--math-ticket))
+                (overlays-in (point-min) (point-max))))
               (should (string-match-p "Deferred setup failed" warning))))
         (when markdown-ts-appear--setup-p
           (markdown-ts-appear-mode -1))))))
@@ -1536,8 +1196,6 @@
 					(let ((original-require (symbol-function 'require))
 					      (markdown-ts-appear--math-cache
 					       (make-hash-table :test #'equal))
-					      (markdown-ts-appear--math-pending
-					       (make-hash-table :test #'equal))
 					      callback formula arguments)
 					  (cl-letf (((symbol-function 'require)
 						     (lambda (feature &optional filename noerror)
@@ -1567,19 +1225,26 @@
 						  (should (equal arguments '(:options (:display nil))))
 						  (funcall callback
 							   '((svg . "<svg width=\"1ex\" height=\"1ex\"></svg>")))
-						  (should (get-text-property (point-min) 'display))
-						  (should
-						   (eq (car (get-text-property
-							     (point-min) 'markdown-ts-appear--math-state))
-						       'rendered)))
+						  (let ((ticket
+							 (markdown-ts-appear--math-ticket-at
+							  (point-min) (+ (point-min) 3))))
+						    (should ticket)
+						    (should (overlay-get ticket 'display))
+						    (should
+						     (eq (overlay-get
+							  ticket 'markdown-ts-appear--math-state)
+							 'rendered))))
 					      (markdown-ts-appear--math-teardown))))))
 
-(ert-deftest markdown-ts-appear-test-copy-filter-preserves-owned-display ()
-  (let ((text (propertize "ab" 'display 'other-package)))
-    (put-text-property 0 1 'markdown-ts-appear--math-state 'rendered text)
-    (markdown-ts-appear--math-filter-copied-text text)
-    (should-not (get-text-property 0 'display text))
-    (should (eq (get-text-property 1 'display text) 'other-package))))
+(ert-deftest markdown-ts-appear-test-copy-ignores-math-overlay ()
+  (with-temp-buffer
+    (insert "$x$")
+    (let ((ticket (make-overlay (point-min) (point-max))))
+      (overlay-put ticket 'markdown-ts-appear--math-ticket t)
+      (overlay-put ticket 'display 'math-image)
+      (let ((copy (buffer-substring (point-min) (point-max))))
+        (should (equal copy "$x$"))
+        (should-not (get-text-property 0 'display copy))))))
 
 (ert-deftest markdown-ts-appear-test-decoration-copy-filter-preserves-other-display ()
   (let ((text (propertize "ab" 'display 'other-package)))
@@ -1588,6 +1253,15 @@
     (should-not (get-text-property 0 'display text))
     (should-not (get-text-property 0 'markdown-ts-appear--decoration text))
     (should (eq (get-text-property 1 'display text) 'other-package))))
+
+(ert-deftest markdown-ts-appear-test-removes-only-markup-invisibility ()
+  (with-temp-buffer
+    (insert "ab")
+    (put-text-property 1 2 'invisible 'other-package)
+    (put-text-property 2 3 'invisible 'markdown-ts--markup)
+    (markdown-ts-appear--remove-markup-invisibility 1 3)
+    (should (eq (get-text-property 1 'invisible) 'other-package))
+    (should-not (get-text-property 2 'invisible))))
 
 (ert-deftest markdown-ts-appear-test-copy-removes-rendered-decorations ()
   (let ((source "> quote\n\n```c\nint x;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"))
@@ -1606,6 +1280,16 @@
 					     (text-property-not-all
 					      0 (length copy) 'wrap-prefix nil copy))))))
 
+(ert-deftest markdown-ts-appear-test-copy-removes-setext-line-height ()
+  (let ((source "Title\n=====\n"))
+    (markdown-ts-appear-test--with-buffer source
+      (let ((copy (filter-buffer-substring (point-min) (point-max))))
+        (should (equal copy source))
+        (should-not (text-property-any 0 (length copy) 'line-height 0 copy))
+        (should-not
+         (text-property-not-all
+          0 (length copy) 'markdown-ts-appear--decoration nil copy))))))
+
 (ert-deftest markdown-ts-appear-test-resolves-icon-fallback ()
   (cl-letf (((symbol-function 'char-displayable-p)
              (lambda (_character) nil)))
@@ -1616,13 +1300,13 @@
 (ert-deftest markdown-ts-appear-test-disable-cleans-block-rendering ()
   (markdown-ts-appear-test--with-buffer
    "> quote\n\n```c\nint x;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
-   (should markdown-ts-appear--block-font-lock-installed-p)
+   (should markdown-ts-appear--block-font-lock-settings)
    (should markdown-ts-appear--decoration-filter-installed-p)
    (should (text-property-not-all
             (point-min) (point-max) 'markdown-ts-appear--decoration nil))
    (markdown-ts-appear-mode -1)
    (font-lock-ensure)
-   (should-not markdown-ts-appear--block-font-lock-installed-p)
+   (should-not markdown-ts-appear--block-font-lock-settings)
    (should-not markdown-ts-appear--decoration-filter-installed-p)
    (should-not (text-property-not-all
                 (point-min) (point-max)
@@ -1630,100 +1314,105 @@
    (should-not (text-property-not-all
                 (point-min) (point-max) 'line-prefix nil))
    (should-not (text-property-not-all
-                (point-min) (point-max) 'wrap-prefix nil))))
+                 (point-min) (point-max) 'wrap-prefix nil))))
+
+(ert-deftest markdown-ts-appear-test-removes-only-owned-font-lock-rules ()
+  (markdown-ts-appear-test--with-buffer "> quote\n"
+    (let* ((owned (car markdown-ts-appear--block-font-lock-settings))
+           (foreign (copy-tree owned t)))
+      (should (memq owned treesit-font-lock-settings))
+      (push foreign treesit-font-lock-settings)
+      (markdown-ts-appear-mode -1)
+      (should-not markdown-ts-appear--block-font-lock-settings)
+      (should-not (memq owned treesit-font-lock-settings))
+      (should (memq foreign treesit-font-lock-settings)))))
 
 (ert-deftest markdown-ts-appear-test-math-cleanup-preserves-other-display ()
   (with-temp-buffer
     (insert "ab")
     (put-text-property 1 2 'display 'other-package)
-    (put-text-property 1 2 'markdown-ts-appear--math-state 'rendered)
-    (put-text-property 2 3 'display 'other-package)
-    (markdown-ts-appear--math-clear-buffer)
-    (should-not (get-text-property 1 'display))
-    (should (eq (get-text-property 2 'display) 'other-package))))
+    (let ((ticket (make-overlay 1 2)))
+      (overlay-put ticket 'markdown-ts-appear--math-ticket t)
+      (overlay-put ticket 'display 'math-image)
+      (markdown-ts-appear--math-clear-buffer)
+      (should-not (overlay-buffer ticket))
+      (should (eq (get-text-property 1 'display) 'other-package)))))
 
-(ert-deftest markdown-ts-appear-test-cancels-pending-math ()
-  (let ((markdown-ts-appear--math-pending (make-hash-table :test #'equal)))
+(ert-deftest markdown-ts-appear-test-clears-math-ticket-and-cancels-timer ()
+  (with-temp-buffer
+    (insert "$x$")
+    (let ((ticket (make-overlay (point-min) (point-max)))
+          cancelled)
+      (overlay-put ticket 'markdown-ts-appear--math-ticket t)
+      (overlay-put ticket 'markdown-ts-appear--math-timer 'timer)
+      (cl-letf (((symbol-function 'cancel-timer)
+                 (lambda (timer) (setq cancelled timer))))
+        (markdown-ts-appear--math-clear-buffer))
+      (should (eq cancelled 'timer))
+      (should-not (overlay-buffer ticket)))))
+
+(ert-deftest markdown-ts-appear-test-ignores-stale-math-token ()
+  (let ((markdown-ts-appear--math-cache (make-hash-table :test #'equal)))
     (with-temp-buffer
       (insert "$x$")
-      (let* ((beg-marker (copy-marker (point-min)))
-             (end-marker (copy-marker (point-max)))
-             (request
-              (list (current-buffer) beg-marker end-marker "$x$" 'key))
-             (requests (make-hash-table :test #'equal))
-             (timer (run-at-time 60 nil #'ignore)))
-        (puthash 'request (list request) requests)
-        (puthash 'key (list timer 'generation requests)
-                 markdown-ts-appear--math-pending)
-        (markdown-ts-appear--math-cancel-pending)
-        (should (zerop (hash-table-count markdown-ts-appear--math-pending)))
-        (should-not (marker-position beg-marker))
-        (should-not (marker-position end-marker))))))
-
-(ert-deftest markdown-ts-appear-test-ignores-stale-math-generation ()
-  (let ((markdown-ts-appear--math-cache (make-hash-table :test #'equal))
-        (markdown-ts-appear--math-pending (make-hash-table :test #'equal)))
-    (with-temp-buffer
-      (insert "$x$")
-      (let* ((beg-marker (copy-marker (point-min)))
-             (end-marker (copy-marker (point-max)))
-             (request
-              (list (current-buffer) beg-marker end-marker "$x$" 'key))
-             (requests (make-hash-table :test #'equal))
-             (timer (run-at-time 60 nil #'ignore))
-             (pending (list timer 'current-generation requests)))
-        (puthash 'request (list request) requests)
-        (puthash 'key pending markdown-ts-appear--math-pending)
+      (let* ((key '(nil 1.1 "x"))
+             (source (buffer-string))
+             (token (make-symbol "current"))
+             (ticket (markdown-ts-appear-test--make-math-ticket
+                      (point-min) (point-max) key source token)))
+        (overlay-put ticket 'markdown-ts-appear--math-state 'pending)
         (markdown-ts-appear--math-finish-render
-         'key 'stale-generation '((error . "late") (transient . t)))
-        (should (eq (gethash 'key markdown-ts-appear--math-pending) pending))
-        (should (marker-position beg-marker))
-        (should (marker-position end-marker))
+         ticket 'stale key source
+         '((error . "late") (transient . t)))
+        (should (overlay-buffer ticket))
+        (should (eq (overlay-get ticket 'markdown-ts-appear--math-state)
+                    'pending))
         (markdown-ts-appear--math-finish-render
-         'key 'current-generation '((error . "current") (transient . t)))
-        (should-not (gethash 'key markdown-ts-appear--math-pending))
-        (should-not (marker-position beg-marker))
-        (should-not (marker-position end-marker))))))
+         ticket token key source
+         '((error . "current") (transient . t)))
+        (should-not (overlay-buffer ticket))))))
 
 (ert-deftest markdown-ts-appear-test-caches-math-image ()
   (let ((markdown-ts-appear--math-cache (make-hash-table :test #'equal))
-        (markdown-ts-appear--math-pending (make-hash-table :test #'equal))
         (calls 0))
-    (cl-letf (((symbol-function 'markdown-ts-appear--math-image)
-               (lambda (_svg &optional _scale)
-                 (setq calls (1+ calls))
-                 (list 'image calls))))
-      (puthash '(nil 1.1 "x")
-               (list (run-at-time 60 nil #'ignore)
-                     'generation (make-hash-table :test #'equal))
-               markdown-ts-appear--math-pending)
-      (markdown-ts-appear--math-finish-render
-       '(nil 1.1 "x") 'generation
-       '((svg . "<svg height=\"1\"></svg>")))
-      (let ((data (gethash '(nil 1.1 "x")
-                           markdown-ts-appear--math-cache)))
-        (should (= calls 1))
-        (should (equal (alist-get 'markdown-ts-appear--math-image data)
-                       '(image 1)))))))
+    (with-temp-buffer
+      (insert "$x$")
+      (let* ((key '(nil 1.1 "x"))
+             (source (buffer-string))
+             (token (make-symbol "math"))
+             (ticket (markdown-ts-appear-test--make-math-ticket
+                      (point-min) (point-max) key source token)))
+        (cl-letf (((symbol-function 'markdown-ts-appear--math-image)
+                   (lambda (_svg &optional _scale)
+                     (setq calls (1+ calls))
+                     (list 'image calls))))
+          (markdown-ts-appear--math-finish-render
+           ticket token key source
+           '((svg . "<svg height=\"1\"></svg>")))
+          (let ((data (gethash key markdown-ts-appear--math-cache)))
+            (should (= calls 1))
+            (should (equal
+                     (alist-get 'markdown-ts-appear--math-image data)
+                     '(image 1)))))))))
 
 (ert-deftest markdown-ts-appear-test-clears-folded-pending-result ()
-  (with-temp-buffer
-    (insert "$x$")
-    (let* ((markdown-ts-appear--math-preview-active-p t)
-           (key '(nil . "x"))
-           (beg-marker (copy-marker (point-min)))
-           (end-marker (copy-marker (point-max)))
-           (request (list (current-buffer) beg-marker end-marker "$x$" key)))
-      (put-text-property (point-min) (point-max)
-                         'markdown-ts-appear--math-state
-                         (list 'pending key))
-      (cl-letf (((symbol-function 'markdown-ts--outline-invisible-p)
-                 (lambda (_position) t)))
-        (markdown-ts-appear--math-display-result request '((svg . "<svg/>"))))
-      (should-not (get-text-property
-                   (point-min) 'markdown-ts-appear--math-state))
-      (should-not (marker-position beg-marker))
-      (should-not (marker-position end-marker)))))
+  (markdown-ts-appear-test--with-buffer "$x$\n"
+    (pcase-let* ((`(,beg ,end ,math ,display-p)
+                   (markdown-ts-appear--math-node-data
+                    (markdown-ts-appear--math-node-at (point-min))))
+                  (key (markdown-ts-appear--math-key math display-p))
+                  (source (buffer-substring-no-properties beg end))
+                  (token (make-symbol "math"))
+                  (ticket (markdown-ts-appear-test--make-math-ticket
+                           beg end key source token)))
+      (let ((markdown-ts-appear--math-preview-active-p t)
+            (markdown-ts-appear--region nil))
+        (cl-letf (((symbol-function 'markdown-ts--outline-invisible-p)
+                   (lambda (_position) t)))
+          (markdown-ts-appear--math-display-result
+           ticket token key source
+           '((markdown-ts-appear--math-image . image)))))
+      (should-not (overlay-buffer ticket)))))
 
 (ert-deftest markdown-ts-appear-test-main-mode-manages-math-lifecycle ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
@@ -1750,36 +1439,61 @@
             (let ((markdown-ts-appear-enable-math-preview t))
               (markdown-ts-appear-mode 1))
             (should markdown-ts-appear--math-preview-active-p)
-            (should markdown-ts-appear--math-filter-installed-p)
             (with-suppressed-warnings ((obsolete outline-view-change-hook))
               (should (memq #'markdown-ts-appear--math-outline-view-change
                             outline-view-change-hook)))
-            (markdown-ts-appear-mode -1)
-            (should-not markdown-ts-appear--math-preview-active-p)
-            (should-not markdown-ts-appear--math-filter-installed-p)
-            (should-not (memq 'markdown-ts-appear--math-state
-                              font-lock-extra-managed-props))))
+            (let ((ticket (make-overlay (point-min) (+ (point-min) 3))))
+              (overlay-put ticket 'markdown-ts-appear--math-ticket t)
+              (markdown-ts-appear-mode -1)
+              (should-not markdown-ts-appear--math-preview-active-p)
+              (should-not (overlay-buffer ticket))
+              (with-suppressed-warnings ((obsolete outline-view-change-hook))
+                (should-not
+                 (memq #'markdown-ts-appear--math-outline-view-change
+                       outline-view-change-hook))))))
       (when (window-live-p window)
         (set-window-buffer window previous-buffer))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
 (ert-deftest markdown-ts-appear-test-installs-advice-only-while-active ()
-  (should-not markdown-ts-appear--advice-installed-p)
+  (should-not (markdown-ts-appear--advice-installed-p))
   (markdown-ts-appear-test--with-buffer "**bold**\n"
-					(should markdown-ts-appear--advice-installed-p))
-  (should-not markdown-ts-appear--advice-installed-p))
+					(should (markdown-ts-appear--advice-installed-p)))
+  (should-not (markdown-ts-appear--advice-installed-p)))
 
-(ert-deftest markdown-ts-appear-test-private-api-contracts ()
-  (should-not (markdown-ts-appear--private-api-incompatibilities))
-  (cl-letf (((symbol-function 'markdown-ts--latex-block-valid-p)
-             (lambda (renamed-node) renamed-node)))
-    (should-not
-     (assq 'markdown-ts--latex-block-valid-p
-           (markdown-ts-appear--private-api-incompatibilities))))
+(ert-deftest markdown-ts-appear-test-required-private-functions-available ()
+  (should-not (markdown-ts-appear--missing-private-functions))
   (markdown-ts-appear-test--with-buffer "**bold**\n"
-					(should markdown-ts-appear--advice-installed-p)
-					(should-not (markdown-ts-appear--private-api-incompatibilities))))
+					(should (markdown-ts-appear--advice-installed-p))
+					(should-not
+					 (markdown-ts-appear--missing-private-functions))))
+
+(ert-deftest markdown-ts-appear-test-bounds-honor-position-argument ()
+  (markdown-ts-appear-test--with-buffer "- first\n\n- second\n"
+    (let ((position
+           (save-excursion
+             (goto-char (point-min))
+             (search-forward "- second")
+             (- (point) (length "- second")))))
+      (goto-char (point-min))
+      (pcase-let ((`(,beg . ,end)
+                   (markdown-ts-appear--bounds-at-point position)))
+        (should (equal (buffer-substring-no-properties beg end) "- "))))))
+
+(ert-deftest markdown-ts-appear-test-helpers-preserve-match-data ()
+  (string-match "\\(seed\\)" "seed")
+  (let ((match-data (match-data)))
+    (markdown-ts-appear--math-scale-svg
+     "<svg width=\"1ex\" height=\"2ex\"></svg>" 2)
+    (should (equal (match-data) match-data)))
+  (markdown-ts-appear-test--with-buffer "> [!NOTE]\n"
+    (let ((quote (markdown-ts-appear--node-ancestor
+                  (treesit-node-at (point-min) 'markdown) "block_quote")))
+      (string-match "\\(seed\\)" "seed")
+      (let ((match-data (match-data)))
+        (should (markdown-ts-appear--callout-data quote))
+        (should (equal (match-data) match-data))))))
 
 (ert-deftest markdown-ts-appear-test-bounds-do-not-force-fontification ()
   (markdown-ts-appear-test--with-buffer "**bold**\n"
@@ -1789,13 +1503,12 @@
 						     (ert-fail "Bounds lookup forced fontification"))))
 					  (should (equal (markdown-ts-appear--bounds) '(1 . 9))))))
 
-(ert-deftest markdown-ts-appear-test-unload-cleans-global-and-clone-state ()
+(ert-deftest markdown-ts-appear-test-unload-cleans-global-state ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
   (let ((original-require (symbol-function 'require))
         (markdown-ts-appear--math-cache (make-hash-table :test #'equal))
-        (markdown-ts-appear--math-pending (make-hash-table :test #'equal))
         (buffer (generate-new-buffer " *markdown-unload*"))
-        clone pending-marker)
+        ticket)
     (unwind-protect
         (cl-letf (((symbol-function 'require)
                    (lambda (feature &optional filename noerror)
@@ -1809,8 +1522,8 @@
                   ((symbol-function 'mathjax-available-p)
                    (lambda () t))
                   ((symbol-function 'buffer-list)
-                   (lambda (&optional _frame)
-                     (delq nil (list buffer clone)))))
+                    (lambda (&optional _frame)
+                      (list buffer))))
           (with-current-buffer buffer
             (insert "[Emacs](https://www.gnu.org/)\n")
             (let ((markdown-ts-appear-enable-math-preview nil))
@@ -1818,39 +1531,20 @@
               (markdown-ts-appear-mode 1))
             (markdown-ts-appear--math-enable)
             (font-lock-ensure)
-            (setq clone
-                  (clone-indirect-buffer " *markdown-unload-clone*" nil))
-            (setq pending-marker (copy-marker (point-min)))
-            (let ((requests (make-hash-table :test #'equal))
-                  (timer (run-at-time 60 nil #'ignore)))
-              (puthash 'request
-                       (list (list buffer pending-marker
-                                   (copy-marker (point-max)) "source" 'key))
-                       requests)
-              (puthash 'key (list timer 'generation requests)
-                       markdown-ts-appear--math-pending)))
+            (setq ticket (make-overlay (point-min) (1+ (point-min))))
+            (overlay-put ticket 'markdown-ts-appear--math-ticket t))
           (puthash 'key 'value markdown-ts-appear--math-cache)
           (markdown-ts-appear-unload-function)
           (with-current-buffer buffer
             (should-not markdown-ts-appear-mode)
             (should-not markdown-ts-appear--math-preview-active-p)
             (should-not markdown-ts-appear--setup-p)
-            (should-not markdown-ts-appear--math-filter-installed-p)
-            (should-not markdown-ts-appear--block-font-lock-installed-p)
+            (should-not markdown-ts-appear--block-font-lock-settings)
             (should-not markdown-ts-appear--decoration-filter-installed-p))
-          (with-current-buffer clone
-            (should-not markdown-ts-appear--base-owner)
-            (should-not markdown-ts-appear--math-filter-installed-p)
-            (should-not markdown-ts-appear--block-font-lock-installed-p)
-            (should-not markdown-ts-appear--decoration-filter-installed-p))
-          (should-not (marker-position pending-marker))
+          (should-not (overlay-buffer ticket))
           (should (zerop (hash-table-count markdown-ts-appear--math-cache)))
-          (should (zerop (hash-table-count markdown-ts-appear--math-pending)))
-          (should-not markdown-ts-appear--advice-installed-p))
-      (when (buffer-live-p clone)
-        (kill-buffer clone))
+          (should-not (markdown-ts-appear--advice-installed-p)))
       (when (buffer-live-p buffer)
-        (kill-buffer buffer))
-      (markdown-ts-appear--math-cancel-pending))))
+        (kill-buffer buffer)))))
 
 ;;; markdown-ts-appear-test.el ends here
