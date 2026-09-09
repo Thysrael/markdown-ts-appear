@@ -153,14 +153,7 @@ jobs:
               (require 'package-lint)
               (setq package-lint-main-file \"markdown-ts-appear.el\")
               (find-file \"markdown-ts-appear.el\")
-              ;; package-lint 0.26 predates the Emacs 31.1 release.
-              (let ((issues
-                     (seq-remove
-                      (lambda (issue)
-                        (equal
-                         (nth 3 issue)
-                         \"This makes the package uninstallable in all released Emacs versions.\"))
-                      (package-lint-buffer))))
+              (let ((issues (package-lint-buffer)))
                 (dolist (issue issues)
                   (message \"markdown-ts-appear.el:%d:%d: %s: %s\"
                            (nth 0 issue) (nth 1 issue)

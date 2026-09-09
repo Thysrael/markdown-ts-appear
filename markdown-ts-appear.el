@@ -405,8 +405,7 @@ When nil, preserve the original Markdown marker."
        ((and (<= (treesit-node-start opening) position)
              (<= position opening-end))
         (cons (treesit-node-start opening) opening-end))
-       ((and closing
-             (<= (treesit-node-start closing) position)
+       ((and (<= (treesit-node-start closing) position)
              (<= position (treesit-node-end closing)))
         (cons (treesit-node-start closing) (treesit-node-end closing)))))))
 
