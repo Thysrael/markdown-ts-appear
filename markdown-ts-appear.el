@@ -1641,11 +1641,21 @@ The value has the same form as `markdown-ts-appear-link-icon'."
                   (goto-char (treesit-node-start row))
                   (skip-chars-forward " \t" row-end)
                   (point)))
+               (content-end
+                (save-excursion
+                  (goto-char row-end)
+                  (skip-chars-backward " \t" content-start)
+                  (point)))
                (pos (max start content-start))
                (end (min limit row-end)))
           (while (< pos end)
             (markdown-ts-appear--decorate
-             pos (1+ pos) (if (eq (char-after pos) ?|) "┼" "─")
+             pos (1+ pos)
+             (if (eq (char-after pos) ?|)
+                 (cond ((eq pos content-start) "├")
+                       ((eq pos (1- content-end)) "┤")
+                       (t "┼"))
+               "─")
              'markdown-ts-appear-table-border)
             (setq pos (1+ pos))))
       (dolist (pipe (markdown-ts-appear--table-pipes row))
