@@ -1074,8 +1074,12 @@
     (should (equal (get-text-property 1 'display) "│"))
     (goto-char (point-min))
     (search-forward "|:--------")
-    (should (equal (get-text-property (match-beginning 0) 'display) "┼"))
+    (should (equal (get-text-property (match-beginning 0) 'display) "├"))
     (should (equal (get-text-property (1+ (match-beginning 0)) 'display) "─"))
+    (search-forward "|")
+    (should (equal (get-text-property (1- (point)) 'display) "┼"))
+    (search-forward "|")
+    (should (equal (get-text-property (1- (point)) 'display) "┤"))
     (goto-char (point-min))
     (search-forward "Element")
     (markdown-ts-appear--update)
@@ -1092,13 +1096,17 @@
 
 (ert-deftest markdown-ts-appear-test-preserves-table-indentation ()
   (markdown-ts-appear-test--with-buffer
-      "  | A | B |\n  |---|---|\n  | 1 | 2 |\n"
+      "  | A | B |\n  |---|---| \t\n  | 1 | 2 |\n"
     (goto-char (point-min))
     (forward-line 1)
     (should-not (get-text-property (point) 'display))
     (should-not (get-text-property (1+ (point)) 'display))
     (search-forward "|")
-    (should (equal (get-text-property (1- (point)) 'display) "┼"))))
+    (should (equal (get-text-property (1- (point)) 'display) "├"))
+    (search-forward "|")
+    (should (equal (get-text-property (1- (point)) 'display) "┼"))
+    (search-forward "|")
+    (should (equal (get-text-property (1- (point)) 'display) "┤"))))
 
 (ert-deftest markdown-ts-appear-test-block-fontifiers-respect-region ()
   (markdown-ts-appear-test--with-buffer
