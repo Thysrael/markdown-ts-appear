@@ -102,10 +102,6 @@ When nil, preserve the original Markdown marker."
   '((t :inherit font-lock-comment-face))
   "Face used for rendered block quote markers.")
 
-(defface markdown-ts-appear-table-line-end
-  '((t :inherit markdown-ts-table :extend nil))
-  "Face preventing rendered table backgrounds from extending past the table.")
-
 (defvar-local markdown-ts-appear-mode nil
   "Non-nil when Markdown TS Appear mode is enabled.")
 
@@ -840,12 +836,6 @@ at most one following space or tab and are not clipped to START or LIMIT."
              (eq markdown-ts-appear-table-style 'unicode)
              (< (max start (treesit-node-start node))
                 (min limit (treesit-node-end node))))
-    (save-match-data
-      (save-excursion
-        (goto-char (max start (treesit-node-start node)))
-        (while (search-forward "\n" (min limit (treesit-node-end node)) t)
-          (add-face-text-property
-           (1- (point)) (point) 'markdown-ts-appear-table-line-end t))))
     (let ((row (treesit-node-first-child-for-pos
                 node (max start (treesit-node-start node)))))
       (while (and row (< (treesit-node-start row) limit))
