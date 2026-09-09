@@ -13,7 +13,7 @@ permissions:
 jobs:
   test:
     name: Emacs ${{ matrix.emacs-version }} / grammar ${{ matrix.grammar-version }} / MathJax ${{ matrix.mathjax }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.mathjax && 'macos-15' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,8 +39,24 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: purcell/setup-emacs@master
+        if: ${{ !matrix.mathjax }}
         with:
           version: ${{ matrix.emacs-version }}
+
+      # purcell's minimal builds have no image support; previews need real SVG.
+      - name: Install SVG-capable Emacs
+        if: matrix.mathjax
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EMACS_VERSION: ${{ matrix.emacs-version }}
+        run: |
+          arch="$(uname -m)"
+          gh release download "Emacs-$EMACS_VERSION" --repo jimeh/emacs-builds \
+            --pattern "*.$arch.dmg*"
+          shasum -a 256 -c *."$arch".dmg.sha256
+          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/emacs" *."$arch".dmg
+          echo "$RUNNER_TEMP/emacs/Emacs.app/Contents/MacOS/bin" >> "$GITHUB_PATH"
 
       - name: Install Tree-sitter grammars
         env:
@@ -79,6 +95,8 @@ jobs:
             (require 'package)
             (package-refresh-contents)
             (package-install 'mathjax)
+            (unless (image-type-available-p 'svg)
+              (error \"This Emacs build lacks SVG image support\"))
             (unless (and (require 'mathjax nil t)
                          (mathjax-available-p))
               (error \"MathJax or Node.js is unavailable\")))"
@@ -109,6 +127,7 @@ jobs:
           emacs --batch -Q -L . \
             --eval '(progn (require (quote package)) (package-initialize))' \
             -l test/markdown-ts-appear-test.el \
+            -l test/markdown-ts-appear-math-test.el \
             -f ert-run-tests-batch-and-exit
 
   package-lint:
@@ -134,14 +153,7 @@ jobs:
               (require 'package-lint)
               (setq package-lint-main-file \"markdown-ts-appear.el\")
               (find-file \"markdown-ts-appear.el\")
-              ;; package-lint 0.26 predates the Emacs 31.1 release.
-              (let ((issues
-                     (seq-remove
-                      (lambda (issue)
-                        (equal
-                         (nth 3 issue)
-                         \"This makes the package uninstallable in all released Emacs versions.\"))
-                      (package-lint-buffer))))
+              (let ((issues (package-lint-buffer)))
                 (dolist (issue issues)
                   (message \"markdown-ts-appear.el:%d:%d: %s: %s\"
                            (nth 0 issue) (nth 1 issue)
