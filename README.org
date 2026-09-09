@@ -125,6 +125,7 @@ to each buffer and are removed when appear mode is disabled.
 - Math rendering uses ~mathjax-display~.  There are no separate cache, timeout,
   scaling, or centering options.  Unchanged formulas keep their previews while
   other text is edited; leaving an unedited formula restores its existing image.
+  Ordinary cursor movement updates visibility without rescanning the document.
   Missing math dependencies signal an error;
   initialization is not rolled back, so disable the mode manually after failure.
 
