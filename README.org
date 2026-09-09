@@ -33,9 +33,10 @@ renders LaTeX fragments asynchronously.
 - Emacs 31.1 or newer
 - The ~markdown~ and ~markdown-inline~ Tree-sitter grammars
 
-Math preview defaults to enabled when the optional ~mathjax~ Emacs package is
-already installed.  It also requires Node.js; neither dependency is installed
-by this package.  Preview is attempted only in a graphical SVG-capable session.
+Math preview is opt-in through ~markdown-ts-appear-enable-math-preview~ and
+managed by ~markdown-ts-appear-mode~ in the same source file.
+It requires the optional ~mathjax~ Emacs package, Node.js, and SVG image support;
+neither external dependency is installed by this package.
 
 * Installation
 
@@ -58,18 +59,18 @@ their normal ~markdown-ts-mode~ appearance.  Wiki links such as
 One possible setup:
 
 #+begin_src emacs-lisp
-(setq markdown-ts-appear-link-icon '("" . "↗")
-      markdown-ts-appear-image-icon '("" . "▧")
+(setq markdown-ts-appear-link-icon ""
+      markdown-ts-appear-image-icon ""
       markdown-ts-appear-code-fence-style 'connected
-      markdown-ts-appear-label-caps '("" . "")
       markdown-ts-appear-render-callouts t
       markdown-ts-appear-block-quote-marker "▎"
       markdown-ts-appear-table-style 'unicode)
 #+end_src
 
-Icons and quote markers are plain strings, with no icon-package dependency.  A
-cons cell such as ~("" . "↗")~ uses the first string when its characters are
-displayable and otherwise falls back to the second.
+Icons are strings and default to ~""~, which disables them.  Quote markers
+accept a string or ~nil~ (the default), which preserves original markers.
+There is no icon-package dependency or preferred/fallback pair support.
+Choose characters supported by your font.
 
 Key options:
 
@@ -77,15 +78,24 @@ Key options:
   ~markdown-ts-appear-wikilink-icon~: add link prefix icons.
 - ~markdown-ts-appear-code-fence-style~: use raw fences or connected Unicode
   lines.
-- ~markdown-ts-appear-label-caps~: surround code-language and callout labels.
 - ~markdown-ts-appear-render-callouts~: render callout labels such as
-  ~[!WARNING]-~; folding is not included.
+  ~[!WARNING]-~; folding is not included.  Labels use theme faces by type
+  (case-insensitive): ~NOTE~ uses ~link~, ~TIP~ uses ~success~, ~IMPORTANT~
+  uses ~font-lock-keyword-face~, ~WARNING~ uses ~warning~, and ~CAUTION~ uses
+  ~error~.  Other types retain the quote-marker face.  Only the label changes,
+  not the quote background; the existing inverse-video label style is retained.
 - ~markdown-ts-appear-block-quote-marker~: replace block quote markers.
 - ~markdown-ts-appear-table-style~: use raw or Unicode table delimiters without
   adding or aligning borders.
 
 Re-enable ~markdown-ts-appear-mode~ after changing structural decoration
 options in an active buffer.
+
+Configure ordinary colors and fonts through the built-in ~markdown-ts-mode~
+faces, including ~markdown-ts-code-block~, ~markdown-ts-block-quote~, and
+~markdown-ts-table~.  Table editing and alignment also belong to
+~markdown-ts-mode~.  This package supplies the additional character replacements,
+labels, and their reveal behavior.
 
 * Math Preview
 
@@ -97,13 +107,20 @@ Install the optional MathJax integration separately:
   :defer t)
 #+end_src
 
-Set ~markdown-ts-appear-enable-math-preview~ to nil to disable preview.  If it is
-enabled without ~mathjax~, the main reveal mode remains active and reports that
-math preview is unavailable.  Re-enable the main mode after installing
-~mathjax~ or changing this option.
+Set this option before enabling the main mode:
 
-Related options are ~markdown-ts-appear-math-timeout~,
-~markdown-ts-appear-center-display-math~, and ~markdown-ts-appear-math-scale~.
+#+begin_src emacs-lisp
+(setq markdown-ts-appear-enable-math-preview t)
+#+end_src
+
+Math preview delegates rendering, image size and error display to
+~mathjax-display~.  It has no separate cache, timeout, scaling or centering
+options.  Editing or changing the set of previewable formulas invalidates the
+current requests and previews; stale results are not installed.  Set the option
+to ~nil~ to disable math preview.  Re-enable ~markdown-ts-appear-mode~ after
+changing this option.  Disabling the mode always cleans up previews and pending
+requests.  Missing MathJax or runtime dependencies signal an error; initialization
+is not rolled back, and the main mode can still be disabled manually.
 
 To render image files themselves, also enable the built-in
 ~markdown-ts-inline-images~ option or run ~markdown-ts-toggle-inline-images~.
@@ -121,6 +138,10 @@ Indirect buffers are unsupported.  Enable ~markdown-ts-appear-mode~ only in a
 base buffer.  A newly created clone is detached from active tracking, but its
 display and edits are not synchronized with the base buffer.
 
+Fontifier advice remains installed while this library is loaded and passes
+through unchanged in inactive buffers.  Editing invalidates icon rendering
+throughout the buffer, favoring simple cleanup over incremental bookkeeping.
+
 * Demo
 
 Open [[file:examples/demo.md][examples/demo.md]] in ~markdown-ts-mode~ to exercise headings, inline markup,
@@ -137,7 +158,9 @@ Run the tests with:
 MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS=1 \
 emacs --batch -Q -L . \
   --eval '(progn (require (quote package)) (package-initialize))' \
+  -l ./markdown-ts-appear.el \
   -l test/markdown-ts-appear-test.el \
+  -l test/markdown-ts-appear-math-test.el \
   -f ert-run-tests-batch-and-exit
 #+end_src
 

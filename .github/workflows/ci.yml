@@ -109,6 +109,7 @@ jobs:
           emacs --batch -Q -L . \
             --eval '(progn (require (quote package)) (package-initialize))' \
             -l test/markdown-ts-appear-test.el \
+            -l test/markdown-ts-appear-math-test.el \
             -f ert-run-tests-batch-and-exit
 
   package-lint:
