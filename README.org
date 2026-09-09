@@ -123,7 +123,9 @@ to each buffer and are removed when appear mode is disabled.
   removes the buffer-local override and uses the current default value.
 - Indirect buffers are unsupported; clones are detached from active tracking.
 - Math rendering uses ~mathjax-display~.  There are no separate cache, timeout,
-  scaling, or centering options.  Missing math dependencies signal an error;
+  scaling, or centering options.  Unchanged formulas keep their previews while
+  other text is edited; leaving an unedited formula restores its existing image.
+  Missing math dependencies signal an error;
   initialization is not rolled back, so disable the mode manually after failure.
 
 * Development

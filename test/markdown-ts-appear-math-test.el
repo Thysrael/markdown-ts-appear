@@ -62,7 +62,6 @@
 (defun markdown-ts-appear-math-test--assert-clean ()
   "Assert that math state and its buffer-local hooks are detached."
   (should-not markdown-ts-appear-math--objects)
-  (should-not markdown-ts-appear-math--sources)
   (should-not (memq #'markdown-ts-appear-math--refresh post-command-hook))
   (should-not (memq #'markdown-ts-appear-math--clear before-change-functions))
   (should-not (memq #'markdown-ts-appear-math--refresh outline-view-change-hook)))
@@ -100,8 +99,18 @@
     (when failure (signal (car failure) (cdr failure)))))
 
 (defun markdown-ts-appear-math-test--overlays ()
-  "Return only overlays owned by the current buffer's math previews."
-  (seq-filter #'overlayp markdown-ts-appear-math--objects))
+  "Return completed previews, including those temporarily showing source."
+  (seq-filter
+   (lambda (preview)
+     (or (overlay-get preview 'markdown-ts-appear-math--image)
+         (overlay-get preview 'mathjax-error)))
+   markdown-ts-appear-math--objects))
+
+(defun markdown-ts-appear-math-test--pending-buffer ()
+  "Return a pending render buffer, if any."
+  (seq-some (lambda (preview)
+              (overlay-get preview 'markdown-ts-appear-math--buffer))
+            markdown-ts-appear-math--objects))
 
 (defun markdown-ts-appear-math-test--move (position)
   "Move to POSITION and run normal command hooks, core first."
@@ -183,7 +192,6 @@
         (run-hooks 'post-command-hook)
         (should-not (overlay-buffer overlay))
         (should-not markdown-ts-appear-math--objects)
-        (should-not markdown-ts-appear-math--sources)
         (should (markdown-ts-appear--active-p))
         (markdown-ts-appear-mode -1)
         (markdown-ts-appear-math-test--assert-clean)))))
@@ -223,14 +231,14 @@
         (should (eq (car (overlay-get overlay 'display)) 'image))
         (should (= (overlay-start overlay) 6))
         (markdown-ts-appear-math-test--move 7)
-        (should-not (overlay-buffer overlay))
+        (should (overlay-buffer overlay))
+        (should-not (overlay-get overlay 'display))
         (should-not (get-char-property 6 'invisible))
         (should-not (get-char-property 7 'display))
         (markdown-ts-appear-math-test--move (point-max))
-        (should (= 1 (length markdown-ts-appear-math-test--callbacks)))
-        (markdown-ts-appear-math-test--deliver
-         (pop markdown-ts-appear-math-test--callbacks))
-        (should (= 1 (length (markdown-ts-appear-math-test--overlays))))))))
+        (should-not markdown-ts-appear-math-test--callbacks)
+        (should (eq (car (overlay-get overlay 'display)) 'image))
+        (should (equal (markdown-ts-appear-math-test--overlays) (list overlay)))))))
 
 (ert-deftest markdown-ts-appear-math-test-late-callback-after-point-moves ()
   (markdown-ts-appear-math-test--deferred
@@ -242,15 +250,15 @@
         (markdown-ts-appear-math-test--deliver
          (pop markdown-ts-appear-math-test--callbacks))
         (if (= position 4)
-            (should (markdown-ts-appear-math-test--overlays))
-          (should-not (markdown-ts-appear-math-test--overlays)))
+            (should (get-char-property 2 'display))
+          (should-not (get-char-property 2 'display)))
         (run-hooks 'post-command-hook)
         (if (= position 4)
             (should (get-char-property 1 'invisible))
           (should-not (get-char-property 1 'invisible)))
         (markdown-ts-appear-math-test--move (point-max))
-        (should (= (if (= position 4) 0 1)
-                   (length markdown-ts-appear-math-test--callbacks)))
+        (should (eq (car (get-char-property 2 'display)) 'image))
+        (should-not markdown-ts-appear-math-test--callbacks)
         (setq markdown-ts-appear-math-test--callbacks nil)))))
 
 (ert-deftest markdown-ts-appear-math-test-edit-and-out-of-order-results ()
@@ -313,7 +321,9 @@
         (run-hooks 'post-command-hook)
         (should-not markdown-ts-appear-math-test--callbacks)
         (markdown-ts-appear-math-test--move 2)
-        (should-not (overlay-buffer overlay))))))
+        (should (overlay-buffer overlay))
+        (should-not (overlay-get overlay 'face))
+        (should-not (get-char-property 2 'display))))))
 
 (ert-deftest markdown-ts-appear-math-test-synchronous-error-cleans-staging ()
   (markdown-ts-appear-math-test--deferred
@@ -321,9 +331,28 @@
       (cl-letf (((symbol-function 'mathjax-render)
                  (lambda (&rest _) (error "Transport unavailable"))))
         (markdown-ts-appear-math-test--enable))
-      (should-not markdown-ts-appear-math--objects)
+      (should-not (markdown-ts-appear-math-test--overlays))
+      (should-not (markdown-ts-appear-math-test--pending-buffer))
       (run-hooks 'post-command-hook)
       (should-not markdown-ts-appear-math-test--callbacks))))
+
+(ert-deftest markdown-ts-appear-math-test-synchronous-results-preserve-node-traversal ()
+  (markdown-ts-appear-math-test--deferred
+    (dolist (result (list markdown-ts-appear-math-test--svg '((error . "Bad TeX"))))
+      (markdown-ts-appear-math-test--buffer "$x$ and $y$ and $z$\n"
+        (let ((calls 0))
+          (cl-letf (((symbol-function 'mathjax-render)
+                     (lambda (callback _math &rest _)
+                       (setq calls (1+ calls))
+                       (funcall callback result))))
+            (markdown-ts-appear-math-test--enable)
+            (dotimes (_ 5)
+              (font-lock-flush)
+              (font-lock-ensure)
+              (run-hooks 'post-command-hook))
+            (should (= calls 3))
+            (should (= (length (markdown-ts-appear-math-test--overlays)) 3))
+            (should-not (markdown-ts-appear-math-test--pending-buffer))))))))
 
 (ert-deftest markdown-ts-appear-math-test-lifecycle-rejects-late-results ()
   (markdown-ts-appear-math-test--deferred
@@ -331,7 +360,7 @@
       (markdown-ts-appear-math-test--buffer "$x$\n"
         (markdown-ts-appear-math-test--enable)
         (let ((target (current-buffer))
-              (staging (car markdown-ts-appear-math--objects))
+              (staging (markdown-ts-appear-math-test--pending-buffer))
               (request (pop markdown-ts-appear-math-test--callbacks)))
           (pcase action
             ('disable (markdown-ts-appear-mode -1))
@@ -348,12 +377,12 @@
           (when (buffer-live-p target)
             (should-not (get-char-property 2 'display))))))))
 
-(ert-deftest markdown-ts-appear-math-test-disable-reenable-generation ()
+(ert-deftest markdown-ts-appear-math-test-disable-reenable-rejects-old-request ()
   (markdown-ts-appear-math-test--deferred
     (markdown-ts-appear-math-test--buffer "$x$\n"
       (markdown-ts-appear-math-test--enable)
       (let ((old (pop markdown-ts-appear-math-test--callbacks))
-            (staging (car markdown-ts-appear-math--objects))
+            (staging (markdown-ts-appear-math-test--pending-buffer))
             (original-kill (symbol-function 'kill-buffer)))
         ;; Keep the old staging buffer alive deliberately: the library's
         ;; buffer-live-p guard must not be the only stale-result protection.
@@ -372,7 +401,7 @@
   (markdown-ts-appear-math-test--deferred
     (markdown-ts-appear-math-test--buffer "$x$\n"
       (markdown-ts-appear-math-test--enable)
-      (let ((staging (car markdown-ts-appear-math--objects))
+      (let ((staging (markdown-ts-appear-math-test--pending-buffer))
             (request (pop markdown-ts-appear-math-test--callbacks))
             (clone (clone-indirect-buffer " *math-clone*" nil)))
         (unwind-protect
@@ -405,7 +434,8 @@
         (should-not markdown-ts-appear-math-test--callbacks)
         (markdown-ts-appear-start)
         (run-hooks 'post-command-hook)
-        (should-not (overlay-buffer overlay))
+        (should (overlay-buffer overlay))
+        (should-not (overlay-get overlay 'display))
         (should-not (get-char-property 1 'invisible))))))
 
 (ert-deftest markdown-ts-appear-math-test-unload-cleans-pending-and-displayed ()
@@ -417,18 +447,18 @@
             (markdown-ts-appear-math-test--deliver
              (pop markdown-ts-appear-math-test--callbacks))
             (let ((objects (copy-sequence markdown-ts-appear-math--objects))
+                  (staging (markdown-ts-appear-math-test--pending-buffer))
                   (request (pop markdown-ts-appear-math-test--callbacks)))
-              (should (seq-some #'bufferp objects))
-              (should (seq-some #'overlayp objects))
+              (should (buffer-live-p staging))
+              (should (markdown-ts-appear-math-test--overlays))
               (markdown-ts-appear-unload-function)
               (should-not markdown-ts-appear-mode)
               (markdown-ts-appear-math-test--assert-clean)
               (dolist (binding (markdown-ts-appear--advice-bindings))
                 (should-not (advice-member-p (cdr binding) (car binding))))
               (dolist (object objects)
-                (should-not (if (bufferp object)
-                                (buffer-live-p object)
-                              (overlay-buffer object))))
+                (should-not (overlay-buffer object)))
+              (should-not (buffer-live-p staging))
               (markdown-ts-appear-math-test--deliver request)
               (should-not markdown-ts-appear-math--objects)))
         (markdown-ts-appear--install-advice)))))
@@ -447,7 +477,8 @@
       (should (eq (car (overlay-get overlay 'display)) 'image))
       (should-not (overlay-get overlay 'mathjax-error))
       (markdown-ts-appear-math-test--move 3)
-      (should-not (overlay-buffer overlay))
+      (should (overlay-buffer overlay))
+      (should-not (overlay-get overlay 'display))
       (should-not (get-char-property 1 'invisible))
       (markdown-ts-appear-mode -1))))
 
@@ -490,7 +521,7 @@
                               (setq result data))
                             math args))))
           (markdown-ts-appear-math-test--enable))
-        (let ((staging (car markdown-ts-appear-math--objects)))
+        (let ((staging (markdown-ts-appear-math-test--pending-buffer)))
           (should-not result)
           (should (bufferp staging))
           (pcase action
@@ -506,6 +537,261 @@
             (with-current-buffer target
               (should-not markdown-ts-appear-math--objects)
               (should-not (get-char-property 2 'display)))))))))
+
+(ert-deftest markdown-ts-appear-math-test-multi-formula-reveal-preserves-cached-overlays ()
+  (markdown-ts-appear-math-test--deferred
+    (markdown-ts-appear-math-test--buffer "before $x$ between $y$ and $z$ after\n"
+      (markdown-ts-appear-math-test--enable)
+      (should (= 3 (length markdown-ts-appear-math-test--callbacks)))
+      (while markdown-ts-appear-math-test--callbacks
+        (markdown-ts-appear-math-test--deliver
+         (pop markdown-ts-appear-math-test--callbacks)))
+      (let* ((overlays (seq-sort-by #'overlay-start #'<
+                                    (markdown-ts-appear-math-test--overlays)))
+             (images (mapcar (lambda (overlay) (overlay-get overlay 'display))
+                             overlays))
+             (x (car overlays)))
+        (should (= 3 (length overlays)))
+        (should (equal (mapcar (lambda (overlay)
+                                 (buffer-substring-no-properties
+                                  (overlay-start overlay) (overlay-end overlay)))
+                               overlays)
+                       '("$x$" "$y$" "$z$")))
+        (dolist (image images)
+          (should (eq (car image) 'image)))
+        (markdown-ts-appear-math-test--move (1+ (overlay-start x)))
+        (cl-mapc (lambda (overlay image)
+                   (should (eq (overlay-buffer overlay) (current-buffer)))
+                   (should (memq overlay (markdown-ts-appear-math-test--overlays)))
+                   (should (eq (overlay-get overlay 'display) image)))
+                 (cdr overlays) (cdr images))
+        (should (eq (overlay-buffer x) (current-buffer)))
+        (should (memq x (markdown-ts-appear-math-test--overlays)))
+        (should-not (overlay-get x 'display))
+        (should-not (get-char-property (overlay-start x) 'invisible))
+        (should-not (get-char-property (point) 'display))
+        (should-not markdown-ts-appear-math-test--callbacks)
+        (markdown-ts-appear-math-test--move (point-max))
+        (should (equal (seq-sort-by #'overlay-start #'<
+                                    (markdown-ts-appear-math-test--overlays))
+                       overlays))
+        (cl-mapc (lambda (overlay image)
+                   (should (eq (overlay-get overlay 'display) image))
+                   (should (eq (get-char-property (overlay-start overlay) 'display)
+                               image)))
+                 overlays images)
+        (should-not markdown-ts-appear-math-test--callbacks)
+        (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                       "before $x$ between $y$ and $z$ after\n"))))))
+
+(ert-deftest markdown-ts-appear-math-test-multi-formula-reveal-preserves-pending-request ()
+  (markdown-ts-appear-math-test--deferred
+    (markdown-ts-appear-math-test--buffer "before $x$ and $y$ after\n"
+      (markdown-ts-appear-math-test--enable)
+      (should (= 2 (length markdown-ts-appear-math-test--callbacks)))
+      (let ((x-request (seq-find (lambda (request) (equal (cadr request) "x"))
+                                 markdown-ts-appear-math-test--callbacks))
+            (y-request (seq-find (lambda (request) (equal (cadr request) "y"))
+                                 markdown-ts-appear-math-test--callbacks)))
+        (should x-request)
+        (should y-request)
+        (setq markdown-ts-appear-math-test--callbacks nil)
+        (markdown-ts-appear-math-test--deliver x-request)
+        (should (= 1 (length (markdown-ts-appear-math-test--overlays))))
+        (let* ((x (car (markdown-ts-appear-math-test--overlays)))
+               (image (overlay-get x 'display))
+               (y-object (seq-find (lambda (object) (not (eq object x)))
+                                   markdown-ts-appear-math--objects)))
+          (should (eq (car image) 'image))
+          (should (= 2 (length markdown-ts-appear-math--objects)))
+          (should y-object)
+          (markdown-ts-appear-math-test--move (1+ (overlay-start x)))
+          (should (memq y-object markdown-ts-appear-math--objects))
+          (should-not markdown-ts-appear-math-test--callbacks)
+          (should (eq (overlay-buffer x) (current-buffer)))
+          (should-not (overlay-get x 'display))
+          (markdown-ts-appear-math-test--move (point-max))
+          (should (memq y-object markdown-ts-appear-math--objects))
+          (should (eq (overlay-get x 'display) image))
+          (should-not markdown-ts-appear-math-test--callbacks)
+          ;; Deliver the original request, not a replacement from a refresh.
+          (markdown-ts-appear-math-test--deliver y-request)
+          (let ((overlays (seq-sort-by #'overlay-start #'<
+                                       (markdown-ts-appear-math-test--overlays))))
+            (should (= 2 (length overlays)))
+            (should (eq (car overlays) x))
+            (should (eq (cadr overlays) y-object))
+            (should (equal (buffer-substring-no-properties
+                            (overlay-start y-object) (overlay-end y-object))
+                           "$y$"))
+            (should (eq (car (overlay-get y-object 'display)) 'image))
+            (should (eq (get-char-property (overlay-start y-object) 'display)
+                        (overlay-get y-object 'display)))
+            (should (eq (overlay-get x 'display) image)))
+          (should-not markdown-ts-appear-math-test--callbacks))))))
+
+(ert-deftest markdown-ts-appear-math-test-multi-formula-edit-preserves-pending-request ()
+  (markdown-ts-appear-math-test--deferred
+    (markdown-ts-appear-math-test--buffer "$x$ and $y$\n"
+      (markdown-ts-appear-math-test--enable)
+      (let ((x-request (seq-find (lambda (request) (equal (cadr request) "x"))
+                                 markdown-ts-appear-math-test--callbacks))
+            (y-request (seq-find (lambda (request) (equal (cadr request) "y"))
+                                 markdown-ts-appear-math-test--callbacks)))
+        (setq markdown-ts-appear-math-test--callbacks nil)
+        (goto-char 2)
+        (insert "x")
+        ;; Complete y at its shifted position before any post-command refresh.
+        (markdown-ts-appear-math-test--deliver y-request)
+        (markdown-ts-appear-math-test--deliver x-request)
+        (let* ((y (car (markdown-ts-appear-math-test--overlays)))
+               (image (overlay-get y 'display)))
+          (should (eq (car image) 'image))
+          (should (equal (buffer-substring-no-properties
+                          (overlay-start y) (overlay-end y)) "$y$"))
+          (run-hooks 'post-command-hook)
+          (should-not markdown-ts-appear-math-test--callbacks)
+          (markdown-ts-appear-math-test--move (point-max))
+          (should (equal (mapcar #'cadr markdown-ts-appear-math-test--callbacks)
+                         '("xx")))
+          (should (eq (overlay-get y 'display) image)))))))
+
+(ert-deftest markdown-ts-appear-math-test-multi-formula-edit-preserves-unrelated-preview ()
+  (markdown-ts-appear-math-test--deferred
+    (markdown-ts-appear-math-test--buffer "before $x$ and $y$ after\n"
+      (markdown-ts-appear-math-test--enable)
+      (should (= 2 (length markdown-ts-appear-math-test--callbacks)))
+      (while markdown-ts-appear-math-test--callbacks
+        (markdown-ts-appear-math-test--deliver
+         (pop markdown-ts-appear-math-test--callbacks)))
+      (let* ((overlays (seq-sort-by #'overlay-start #'<
+                                    (markdown-ts-appear-math-test--overlays)))
+             (x (car overlays))
+             (y (cadr overlays))
+             (x-start (overlay-start x))
+             (y-start (overlay-start y))
+             (y-end (overlay-end y))
+             (y-image (overlay-get y 'display)))
+        (should (= 2 (length overlays)))
+        (should (eq (car (overlay-get x 'display)) 'image))
+        (should (eq (car y-image) 'image))
+        ;; Do not refresh on entry: isolate invalidation by the edit hooks.
+        (goto-char (1- (overlay-end x)))
+        (insert "+1")
+        (should (eq (overlay-buffer y) (current-buffer)))
+        (should (memq y markdown-ts-appear-math--objects))
+        (should (= (overlay-start y) (+ y-start 2)))
+        (should (= (overlay-end y) (+ y-end 2)))
+        (should (eq (overlay-get y 'display) y-image))
+        (should-not (get-char-property (1+ x-start) 'display))
+        (font-lock-ensure)
+        (markdown-ts-appear-math-test--move (point-max))
+        (should (equal (mapcar #'cadr markdown-ts-appear-math-test--callbacks)
+                       '("x+1")))
+        (should (memq y (markdown-ts-appear-math-test--overlays)))
+        (should (eq (overlay-get y 'display) y-image))
+        (markdown-ts-appear-math-test--deliver
+         (pop markdown-ts-appear-math-test--callbacks))
+        (let ((updated (seq-sort-by #'overlay-start #'<
+                                    (markdown-ts-appear-math-test--overlays))))
+          (should (= 2 (length updated)))
+          (should (eq (cadr updated) y))
+          (should (= (overlay-start (car updated)) x-start))
+          (should (equal (mapcar (lambda (overlay)
+                                   (buffer-substring-no-properties
+                                    (overlay-start overlay) (overlay-end overlay)))
+                                 updated)
+                         '("$x+1$" "$y$")))
+          (should (eq (car (overlay-get (car updated) 'display)) 'image)))
+        (should (eq (get-char-property (overlay-start y) 'display) y-image))
+        (should-not markdown-ts-appear-math-test--callbacks)
+        (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                       "before $x+1$ and $y$ after\n"))))))
+
+(ert-deftest markdown-ts-appear-math-test-multi-formula-prefix-insertion-preserves-previews ()
+  (markdown-ts-appear-math-test--deferred
+    (markdown-ts-appear-math-test--buffer "before $x$ and $y$ after\n"
+      (markdown-ts-appear-math-test--enable)
+      (should (= 2 (length markdown-ts-appear-math-test--callbacks)))
+      (while markdown-ts-appear-math-test--callbacks
+        (markdown-ts-appear-math-test--deliver
+         (pop markdown-ts-appear-math-test--callbacks)))
+      (let* ((overlays (seq-sort-by #'overlay-start #'<
+                                    (markdown-ts-appear-math-test--overlays)))
+             (images (mapcar (lambda (overlay) (overlay-get overlay 'display))
+                             overlays))
+             (starts (mapcar #'overlay-start overlays))
+             (ends (mapcar #'overlay-end overlays))
+             (prefix "intro\n\n"))
+        (should (= 2 (length overlays)))
+        (dolist (image images)
+          (should (eq (car image) 'image)))
+        (goto-char (point-min))
+        (insert prefix)
+        (dolist (refresh '(nil t))
+          (ert-info ((if refresh "After refresh" "Before refresh"))
+            (when refresh
+              (font-lock-ensure)
+              (markdown-ts-appear-math-test--move (point-max)))
+            (cl-mapc (lambda (overlay image start end)
+                       (should (eq (overlay-buffer overlay) (current-buffer)))
+                       (should (memq overlay markdown-ts-appear-math--objects))
+                       (should (= (overlay-start overlay) (+ start (length prefix))))
+                       (should (= (overlay-end overlay) (+ end (length prefix))))
+                       (should (eq (overlay-get overlay 'display) image))
+                       (should (eq (get-char-property (overlay-start overlay) 'display)
+                                   image)))
+                     overlays images starts ends)
+            (should (equal (seq-sort-by #'overlay-start #'<
+                                        (markdown-ts-appear-math-test--overlays))
+                           overlays))
+            (should (equal (mapcar (lambda (overlay)
+                                     (buffer-substring-no-properties
+                                      (overlay-start overlay) (overlay-end overlay)))
+                                   overlays)
+                           '("$x$" "$y$")))
+            (should-not markdown-ts-appear-math-test--callbacks)))
+        (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                       "intro\n\nbefore $x$ and $y$ after\n"))))))
+
+(ert-deftest markdown-ts-appear-math-test-multi-formula-code-context-invalidates-only-affected-preview ()
+  (markdown-ts-appear-math-test--deferred
+    (markdown-ts-appear-math-test--buffer "lead\n\n$x$\n\n$y$\n\ntail\n"
+      (markdown-ts-appear-math-test--enable)
+      (should (= 2 (length markdown-ts-appear-math-test--callbacks)))
+      (while markdown-ts-appear-math-test--callbacks
+        (markdown-ts-appear-math-test--deliver
+         (pop markdown-ts-appear-math-test--callbacks)))
+      (let* ((overlays (seq-sort-by #'overlay-start #'<
+                                    (markdown-ts-appear-math-test--overlays)))
+             (x (car overlays))
+             (y (cadr overlays))
+             (x-start (overlay-start x))
+             (y-start (overlay-start y))
+             (y-image (overlay-get y 'display)))
+        (should (= 2 (length overlays)))
+        (should (eq (car (overlay-get x 'display)) 'image))
+        (should (eq (car y-image) 'image))
+        ;; Change only context: the unchanged $x$ becomes an indented code block.
+        (goto-char x-start)
+        (insert "    ")
+        (font-lock-ensure)
+        (markdown-ts-appear-math-test--move (point-max))
+        (should-not (overlay-buffer x))
+        (should-not (memq x markdown-ts-appear-math--objects))
+        (should-not (get-char-property (+ x-start 4) 'display))
+        (should (eq (overlay-buffer y) (current-buffer)))
+        (should (equal (markdown-ts-appear-math-test--overlays) (list y)))
+        (should (equal markdown-ts-appear-math--objects (list y)))
+        (should (= (overlay-start y) (+ y-start 4)))
+        (should (equal (buffer-substring-no-properties
+                        (overlay-start y) (overlay-end y))
+                       "$y$"))
+        (should (eq (overlay-get y 'display) y-image))
+        (should (eq (get-char-property (overlay-start y) 'display) y-image))
+        (should-not markdown-ts-appear-math-test--callbacks)
+        (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                       "lead\n\n    $x$\n\n$y$\n\ntail\n"))))))
 
 (provide 'markdown-ts-appear-math-test)
 ;;; markdown-ts-appear-math-test.el ends here

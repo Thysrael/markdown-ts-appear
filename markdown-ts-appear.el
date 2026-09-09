@@ -112,12 +112,8 @@ When nil, preserve the original Markdown marker."
 (defvar-local markdown-ts-appear--region nil
   "Markers delimiting the semantic Markdown source currently visible.")
 
-(defvar-local markdown-ts-appear-math--generation 0
-  "Generation used to reject invalidated render results.")
-(defvar-local markdown-ts-appear-math--sources nil
-  "Formula sources requested by the last preview refresh.")
 (defvar-local markdown-ts-appear-math--objects nil
-  "Owned render buffers and displayed overlays.")
+  "Formula overlays, each holding its source, image and pending render buffer.")
 
 (defvar-local markdown-ts-appear--last-point nil
   "Buffer position checked by the most recent reveal update.")
@@ -1246,13 +1242,22 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
 
 ;;; Optional math previews
 
-(defun markdown-ts-appear-math--clear (&rest _)
-  "Invalidate callbacks and dispose only of this buffer's preview objects."
-  (cl-incf markdown-ts-appear-math--generation)
-  (setq markdown-ts-appear-math--sources nil)
-  (dolist (object markdown-ts-appear-math--objects)
-    (if (bufferp object) (kill-buffer object) (delete-overlay object)))
-  (setq markdown-ts-appear-math--objects nil))
+(defun markdown-ts-appear-math--delete (preview)
+  "Remove PREVIEW and invalidate its pending render, if any."
+  (let ((staging (overlay-get preview 'markdown-ts-appear-math--buffer)))
+    (delete-overlay preview)
+    (setq markdown-ts-appear-math--objects
+          (delq preview markdown-ts-appear-math--objects))
+    (when (buffer-live-p staging)
+      (kill-buffer staging))))
+
+(defun markdown-ts-appear-math--clear (&optional beg end)
+  "Clear previews, or only those whose source is edited between BEG and END."
+  (dolist (preview markdown-ts-appear-math--objects)
+    (when (or (null beg) (not (overlay-buffer preview))
+              (and (< (overlay-start preview) end)
+                   (> (overlay-end preview) beg)))
+      (markdown-ts-appear-math--delete preview))))
 
 (defun markdown-ts-appear-math--eligible-p (beg end)
   "Return non-nil when BEG through END may cover source with a preview."
@@ -1262,16 +1267,24 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
        (not (markdown-ts-appear--region-visible-p beg end))
        (not (markdown-ts--outline-invisible-p beg))))
 
-(defun markdown-ts-appear-math--request (data)
-  "Render DATA, a (BEG END SOURCE MATH DISPLAY-P) list, asynchronously."
-  (pcase-let* ((`(,beg ,end ,source ,math ,display-p) data)
-               (target (current-buffer))
-               (generation markdown-ts-appear-math--generation)
-               (tick (buffer-chars-modified-tick))
-               (staging (generate-new-buffer " *markdown-ts-appear-math*")))
-    (push staging markdown-ts-appear-math--objects)
+(defun markdown-ts-appear-math--display (preview)
+  "Show PREVIEW's saved image unless its source is currently revealed."
+  (let* ((visible (markdown-ts-appear-math--eligible-p
+                   (overlay-start preview) (overlay-end preview)))
+         (image (and visible (overlay-get preview 'markdown-ts-appear-math--image))))
+    (unless (eq image (overlay-get preview 'display))
+      (overlay-put preview 'display image))
+    (overlay-put preview 'face
+                 (and visible (overlay-get preview 'mathjax-error) 'error))))
+
+(defun markdown-ts-appear-math--request (preview math display-p)
+  "Render MATH into PREVIEW; DISPLAY-P selects display rather than inline math."
+  (let ((target (current-buffer))
+        (source (overlay-get preview 'markdown-ts-appear-math--source))
+        (staging (generate-new-buffer " *markdown-ts-appear-math*")))
+    (overlay-put preview 'markdown-ts-appear-math--buffer staging)
     ;; MathJax deletes existing `mathjax' overlays BEFORE calling :after.
-    ;; Isolate that operation, then transfer only the validated new overlay.
+    ;; Isolate that operation, then copy valid results to our anchored preview.
     (with-current-buffer staging
       (insert source)
       (condition-case err
@@ -1280,26 +1293,34 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
            :after
            (lambda (overlay)
              (unwind-protect
-                 (when (buffer-live-p target)
+                 (when (eq (overlay-buffer preview) target)
                    (with-current-buffer target
                      (save-restriction
                        (widen)
-                       (setq markdown-ts-appear-math--objects
-                             (delq staging markdown-ts-appear-math--objects))
-                       (when (and (= generation markdown-ts-appear-math--generation)
-                                  (= tick (buffer-chars-modified-tick))
-                                  (<= (point-min) beg end (point-max))
-                                  (equal source (buffer-substring-no-properties beg end))
-                                  (markdown-ts-appear-math--eligible-p beg end))
-                         (move-overlay overlay beg end target)
-                         (push overlay markdown-ts-appear-math--objects)))))
-               (when (eq (overlay-buffer overlay) staging)
-                 (delete-overlay overlay))
-               (kill-buffer staging))))
+                       (let ((beg (overlay-start preview))
+                             (end (overlay-end preview)))
+                         (treesit-update-ranges beg end)
+                         (let ((node (markdown-ts-appear--node-ancestor
+                                      (treesit-node-at beg 'markdown-inline)
+                                      "latex_block")))
+                           (if (and markdown-ts-appear-enable-math-preview
+                                    (markdown-ts-appear--active-p)
+                                    node (= beg (treesit-node-start node))
+                                    (= end (treesit-node-end node))
+                                    (not (markdown-ts-appear--literal-block-at beg))
+                                    (equal source (buffer-substring-no-properties beg end)))
+                               (progn
+                                 (overlay-put preview 'markdown-ts-appear-math--image
+                                              (overlay-get overlay 'display))
+                                 (overlay-put preview 'mathjax-error
+                                              (overlay-get overlay 'mathjax-error))
+                                 (markdown-ts-appear-math--display preview))
+                             (markdown-ts-appear-math--delete preview)))))))
+               (overlay-put preview 'markdown-ts-appear-math--buffer nil)
+               (delete-overlay overlay)
+               (when (buffer-live-p staging) (kill-buffer staging)))))
         (error
-         (with-current-buffer target
-           (setq markdown-ts-appear-math--objects
-                 (delq staging markdown-ts-appear-math--objects)))
+         (overlay-put preview 'markdown-ts-appear-math--buffer nil)
          (kill-buffer staging)
          (message "Markdown MathJax preview failed: %s" (error-message-string err)))))))
 
@@ -1311,7 +1332,12 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
     (save-restriction
       (widen)
       (treesit-update-ranges (point-min) (point-max))
-      (let (sources)
+      (let ((existing (make-hash-table :test #'eql))
+            (current (make-hash-table :test #'eq))
+            requests)
+        (dolist (preview markdown-ts-appear-math--objects)
+          (when (eq (overlay-buffer preview) (current-buffer))
+            (puthash (overlay-start preview) preview existing)))
         (dolist (parser (treesit-parser-list nil 'markdown-inline t))
           (dolist (node (treesit-query-capture
                          (treesit-parser-root-node parser)
@@ -1323,17 +1349,35 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
               (when (and (markdown-ts--latex-block-valid-p node)
                          (equal (treesit-node-type opening) "latex_span_delimiter")
                          (equal (treesit-node-type closing) "latex_span_delimiter")
-                         (< (treesit-node-start opening) (treesit-node-start closing))
-                         (markdown-ts-appear-math--eligible-p beg end))
-                (push (list beg end (treesit-node-text node t)
-                            (buffer-substring-no-properties
-                             (treesit-node-end opening) (treesit-node-start closing))
-                            (and (member (treesit-node-text opening t) '("$$" "\\[")) t))
-                      sources)))))
-        (unless (equal sources markdown-ts-appear-math--sources)
-          (markdown-ts-appear-math--clear)
-          (setq markdown-ts-appear-math--sources sources)
-          (mapc #'markdown-ts-appear-math--request sources))))))
+                         (< (treesit-node-start opening) (treesit-node-start closing)))
+                (let* ((source (treesit-node-text node t))
+                       (candidate (gethash beg existing))
+                       (preview
+                        (and candidate (= end (overlay-end candidate))
+                             (equal source (overlay-get
+                                            candidate 'markdown-ts-appear-math--source))
+                             candidate)))
+                  (when (and (not preview) (markdown-ts-appear-math--eligible-p beg end))
+                    (setq preview (make-overlay beg end nil t nil))
+                    (overlay-put preview 'category 'mathjax)
+                    (overlay-put preview 'evaporate t)
+                    (overlay-put preview 'markdown-ts-appear-math--source source)
+                    (push preview markdown-ts-appear-math--objects)
+                    (puthash beg preview existing)
+                    (push (list preview
+                                (buffer-substring-no-properties
+                                 (treesit-node-end opening) (treesit-node-start closing))
+                                (and (member (treesit-node-text opening t) '("$$" "\\[")) t))
+                          requests))
+                  (when (and preview (overlay-buffer preview))
+                    (puthash preview t current)
+                    (markdown-ts-appear-math--display preview)))))))
+        (dolist (preview markdown-ts-appear-math--objects)
+          (unless (gethash preview current)
+            (markdown-ts-appear-math--delete preview)))
+        ;; A synchronous renderer can reparse; finish reading all nodes first.
+        (dolist (request (nreverse requests))
+          (apply #'markdown-ts-appear-math--request request))))))
 
 (defun markdown-ts-appear-math--setup ()
   "Install math preview hooks and render eligible formulas."
