@@ -11,36 +11,21 @@
 
 Can plain text keep its source while feeling almost rendered?
 
-~markdown-ts-appear~ builds on Emacs 31's Tree-sitter-powered
-~markdown-ts-mode~ to do both: Markdown stays visually rendered while reading,
-then the smallest element at point smoothly reveals its source for editing.
-The characters themselves become the interface: headings, quotes, code blocks,
-tables, and callouts are shaped with fonts, spacing, Unicode, and native display
-properties, not a separate preview or browser-like UI.  Optional MathJax support
-renders LaTeX fragments asynchronously.
+Reveal the Markdown source of the smallest element at point, then restore its
+rendered appearance when point leaves.  This minor mode extends the built-in
+~markdown-ts-mode~ without changing buffer text.
 
-* Highlights
-
-- Smooth, syntax-aware reveal powered by Tree-sitter
-- Focused editing: reveal only the element at point
-- An interface made from characters, not browser-like widgets
-- Optional decorations for links, code fences, quotes, callouts, and tables
-- Optional asynchronous LaTeX preview through MathJax
-- Public controls for pausing and resuming point tracking
+Optional features include link icons, code fences, quote markers, callout
+labels, table borders, and MathJax previews.
 
 * Requirements
 
-- Emacs 31.1 or newer
-- The ~markdown~ and ~markdown-inline~ Tree-sitter grammars
-
-Math preview is opt-in through ~markdown-ts-appear-enable-math-preview~ and
-managed by ~markdown-ts-appear-mode~ in the same source file.
-It requires the optional ~mathjax~ Emacs package, Node.js, and SVG image support;
-neither external dependency is installed by this package.
+- Emacs 31.1+ with Tree-sitter support.
+- The ~markdown~ and ~markdown-inline~ grammars.
+- For math previews: the ~mathjax~ package, Node.js, and an Emacs build with SVG
+  image support.
 
 * Installation
-
-With ~use-package~ and ~package-vc~:
 
 #+begin_src emacs-lisp
 (use-package markdown-ts-appear
@@ -50,109 +35,98 @@ With ~use-package~ and ~package-vc~:
   :hook (markdown-ts-mode . markdown-ts-appear-mode))
 #+end_src
 
-Visual decorations are opt-in; without further configuration, elements retain
-their normal ~markdown-ts-mode~ appearance.  Wiki links such as
-~[[target|alias]]~ are supported by the grammar's default configuration.
-
-* Customization
-
-One possible setup:
-
-#+begin_src emacs-lisp
-(setq markdown-ts-appear-link-icon ""
-      markdown-ts-appear-image-icon ""
-      markdown-ts-appear-code-fence-style 'connected
-      markdown-ts-appear-render-callouts t
-      markdown-ts-appear-block-quote-marker "▎"
-      markdown-ts-appear-table-style 'unicode)
-#+end_src
-
-Icons are strings and default to ~""~, which disables them.  Quote markers
-accept a string or ~nil~ (the default), which preserves original markers.
-There is no icon-package dependency or preferred/fallback pair support.
-Choose characters supported by your font.
-
-Key options:
-
-- ~markdown-ts-appear-link-icon~, ~markdown-ts-appear-image-icon~, and
-  ~markdown-ts-appear-wikilink-icon~: add link prefix icons.
-- ~markdown-ts-appear-code-fence-style~: use raw fences or connected Unicode
-  lines.
-- ~markdown-ts-appear-render-callouts~: render callout labels such as
-  ~[!WARNING]-~; folding is not included.  Labels use theme faces by type
-  (case-insensitive): ~NOTE~ uses ~link~, ~TIP~ uses ~success~, ~IMPORTANT~
-  uses ~font-lock-keyword-face~, ~WARNING~ uses ~warning~, and ~CAUTION~ uses
-  ~error~.  Other types retain the quote-marker face.  Only the label changes,
-  not the quote background; the existing inverse-video label style is retained.
-- ~markdown-ts-appear-block-quote-marker~: replace block quote markers.
-- ~markdown-ts-appear-table-style~: use raw or Unicode table delimiters without
-  adding or aligning borders.
-
-Re-enable ~markdown-ts-appear-mode~ after changing structural decoration
-options in an active buffer.
-
-Configure ordinary colors and fonts through the built-in ~markdown-ts-mode~
-faces, including ~markdown-ts-code-block~, ~markdown-ts-block-quote~, and
-~markdown-ts-table~.  Table editing and alignment also belong to
-~markdown-ts-mode~.  This package supplies the additional character replacements,
-labels, and their reveal behavior.
-
-* Math Preview
-
-Install the optional MathJax integration separately:
+For optional math previews, also install ~mathjax~ and enable the option below:
 
 #+begin_src emacs-lisp
 (use-package mathjax
   :ensure t
   :defer t)
-#+end_src
 
-Set this option before enabling the main mode:
-
-#+begin_src emacs-lisp
 (setq markdown-ts-appear-enable-math-preview t)
 #+end_src
 
-Math preview delegates rendering, image size and error display to
-~mathjax-display~.  It has no separate cache, timeout, scaling or centering
-options.  Editing or changing the set of previewable formulas invalidates the
-current requests and previews; stale results are not installed.  Set the option
-to ~nil~ to disable math preview.  Re-enable ~markdown-ts-appear-mode~ after
-changing this option.  Disabling the mode always cleans up previews and pending
-requests.  Missing MathJax or runtime dependencies signal an error; initialization
-is not rolled back, and the main mode can still be disabled manually.
+* Configuration
 
-To render image files themselves, also enable the built-in
-~markdown-ts-inline-images~ option or run ~markdown-ts-toggle-inline-images~.
+| Option                                   | Default | Values and effect                                        |
+|------------------------------------------+---------+----------------------------------------------------------|
+| ~markdown-ts-appear-enable-math-preview~ | ~nil~   | ~t~ enables asynchronous math previews.                  |
+| ~markdown-ts-appear-link-icon~           | ~""~    | String before ordinary links; empty disables it.         |
+| ~markdown-ts-appear-image-icon~          | ~""~    | String before image links; empty disables it.            |
+| ~markdown-ts-appear-wikilink-icon~       | ~""~    | String before Wiki links; empty disables it.             |
+| ~markdown-ts-appear-code-fence-style~    | ~raw~   | ~raw~ or ~connected~ fences with a language label.       |
+| ~markdown-ts-appear-block-quote-marker~  | ~nil~   | Replacement string; ~nil~ keeps the original marker.     |
+| ~markdown-ts-appear-render-callouts~     | ~nil~   | ~t~ renders callout labels; does not implement folding.  |
+| ~markdown-ts-appear-table-style~         | ~raw~   | ~raw~ or ~unicode~ delimiters; does not align the table. |
 
-* Tracking Control
+Disable and re-enable ~markdown-ts-appear-mode~ after changing structural or
+math options in an active buffer.
 
-The mode tracks point whenever it is enabled.  External modal-editor
-configuration can call ~markdown-ts-appear-stop~ and
-~markdown-ts-appear-start~ to pause and resume tracking; the package contains
-no Evil- or Meow-specific integration.
+Callout types are case-insensitive.  Label colors use the current theme:
 
-* Limitations
+| Type      | Face                                    |
+|-----------+-----------------------------------------|
+| NOTE      | ~link~                                  |
+| TIP       | ~success~                               |
+| IMPORTANT | ~font-lock-keyword-face~                |
+| WARNING   | ~warning~                               |
+| CAUTION   | ~error~                                 |
+| Other     | ~markdown-ts-appear-block-quote-marker~ |
 
-Indirect buffers are unsupported.  Enable ~markdown-ts-appear-mode~ only in a
-base buffer.  A newly created clone is detached from active tracking, but its
-display and edits are not synchronized with the base buffer.
+Configure ordinary colors and fonts through ~markdown-ts-mode~ faces, such as
+~markdown-ts-code-block~, ~markdown-ts-block-quote~, and ~markdown-ts-table~.
+Use ~markdown-ts-table-auto-align~ for table alignment and
+~markdown-ts-inline-images~ to display image files.
 
-Fontifier advice remains installed while this library is loaded and passes
-through unchanged in inactive buffers.  Editing invalidates icon rendering
-throughout the buffer, favoring simple cleanup over incremental bookkeeping.
+* Modal Editing
 
-* Demo
+By default, source is revealed whenever point enters an element.  To reveal
+only in insert state, use one of these configurations.  State hooks are local
+to each buffer and are removed when appear mode is disabled.
 
-Open [[file:examples/demo.md][examples/demo.md]] in ~markdown-ts-mode~ to exercise headings, inline markup,
-links, images, lists, tasks, tables, MathJax previews, and other revealable
-elements.  Math examples use the delimiters supported by the Markdown grammar:
-~$...$~ and ~$$...$$~.  The local SVG keeps the image example independent of
-the network.
+** Evil
+
+#+begin_src emacs-lisp
+(defun my/markdown-appear-evil ()
+  "Reveal Markdown source only in Evil insert state."
+  (if markdown-ts-appear-mode
+      (progn
+        (add-hook 'evil-insert-state-entry-hook #'markdown-ts-appear-start nil t)
+        (add-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop nil t)
+        (unless (eq (bound-and-true-p evil-state) 'insert)
+          (markdown-ts-appear-stop)))
+    (remove-hook 'evil-insert-state-entry-hook #'markdown-ts-appear-start t)
+    (remove-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop t)))
+
+(add-hook 'markdown-ts-appear-mode-hook #'my/markdown-appear-evil)
+#+end_src
+
+** Meow
+
+#+begin_src emacs-lisp
+(defun my/markdown-appear-meow ()
+  "Reveal Markdown source only in Meow insert state."
+  (if markdown-ts-appear-mode
+      (progn
+        (add-hook 'meow-insert-enter-hook #'markdown-ts-appear-start nil t)
+        (add-hook 'meow-insert-exit-hook #'markdown-ts-appear-stop nil t)
+        (unless (bound-and-true-p meow-insert-mode)
+          (markdown-ts-appear-stop)))
+    (remove-hook 'meow-insert-enter-hook #'markdown-ts-appear-start t)
+    (remove-hook 'meow-insert-exit-hook #'markdown-ts-appear-stop t)))
+
+(add-hook 'markdown-ts-appear-mode-hook #'my/markdown-appear-meow)
+#+end_src
+
+* Behavior Notes
+
+- Enabling appear mode turns on ~markdown-ts-hide-markup~.  Disabling it
+  removes the buffer-local override and uses the current default value.
+- Indirect buffers are unsupported; clones are detached from active tracking.
+- Math rendering uses ~mathjax-display~.  There are no separate cache, timeout,
+  scaling, or centering options.  Missing math dependencies signal an error;
+  initialization is not rolled back, so disable the mode manually after failure.
 
 * Development
-
-Run the tests with:
 
 #+begin_src shell
 MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS=1 \
@@ -164,15 +138,10 @@ emacs --batch -Q -L . \
   -f ert-run-tests-batch-and-exit
 #+end_src
 
-Without ~MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS~, tests that require the Markdown
-Tree-sitter grammars are skipped when the grammars are unavailable.  To also
-require the optional package, Node.js, and a real MathJax-to-SVG render, add
-~MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1~ before the command.
-
-CI covers the latest and baseline Markdown grammars, real MathJax-to-SVG
-rendering, Emacs snapshots, and compatibility with the private
-~markdown-ts-mode~ functions used by the package.
+Add ~MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1~ to require the optional math
+dependencies and real SVG rendering tests.  Without the corresponding
+environment variable, tests with unavailable dependencies are skipped.
 
 * License
 
-GNU General Public License version 3 or later.  See [[file:COPYING][COPYING]].
+GNU GPL version 3 or later.  See [[file:COPYING][COPYING]].
