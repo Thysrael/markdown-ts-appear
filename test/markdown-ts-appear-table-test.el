@@ -134,6 +134,14 @@
       (should-not (overlay-get overlay 'display))
       (should (equal source (buffer-string)))
       (markdown-ts-appear-stop)
+      ;; A replacing display string makes its underlying positions
+      ;; inaccessible.  Paused tracking must still expose the row at point.
+      (should-not (overlay-get overlay 'display))
+      (let ((position (point)))
+        (forward-char)
+        (should (= (1+ position) (point))))
+      (goto-char (point-max))
+      (run-hooks 'post-command-hook)
       (should (equal (overlay-get overlay 'display)
                      (markdown-ts-appear-table-test--display overlay)))
       (goto-char (point-min))

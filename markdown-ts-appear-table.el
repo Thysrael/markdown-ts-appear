@@ -278,10 +278,20 @@ DISPLAY-P non-nil restores their rendered display."
 
 (defun markdown-ts-appear-table--visible-region ()
   "Return numeric bounds of source currently revealed by the main mode."
-  (when-let* ((region markdown-ts-appear--region)
-              (beg (marker-position (car region)))
-              (end (marker-position (cdr region))))
-    (cons beg end)))
+  (or (when-let* ((region markdown-ts-appear--region)
+                  (beg (marker-position (car region)))
+                  (end (marker-position (cdr region))))
+        (cons beg end))
+      ;; Replacing display strings do not permit horizontal cursor motion
+      ;; through their source.  Keep the row at point editable even when the
+      ;; main source tracker is paused by a modal editor.
+      (when-let* ((overlay
+                   (seq-find
+                    (lambda (candidate)
+                      (overlay-get candidate
+                                   'markdown-ts-appear-table--wrapped))
+                    (overlays-at (point)))))
+        (cons (overlay-start overlay) (overlay-end overlay)))))
 
 (defun markdown-ts-appear-table--update-visibility ()
   "Synchronize wrapped rows with the main mode's visible source region."
