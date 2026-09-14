@@ -78,9 +78,11 @@ Use ~markdown-ts-table-auto-align~ for table alignment and
 
 The ~wrapped~ table style displays canonical pipe-table source as a Unicode
 table fitted to each window.  Long cells wrap without changing buffer text;
-moving point into a source row reveals that row for editing.  Resizing or
-editing rebuilds the view.  This integration currently uses an internal
-~markdown-table-wrap~ rendering API while its public display API is finalized.
+when source tracking is active, moving point into a row reveals it for editing.
+When tracking is paused, the row at point stays rendered while preserving
+normal cursor motion.  Resizing or editing rebuilds the view.  This integration
+currently uses an internal ~markdown-table-wrap~ rendering API while its public
+display API is finalized.
 
 * Modal Editing
 

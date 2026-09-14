@@ -58,16 +58,51 @@
   "Return OVERLAY's saved wrapped display regardless of reveal state."
   (overlay-get overlay 'markdown-ts-appear-table--display))
 
+(defun markdown-ts-appear-table-test--row-overlays-at (position &optional window)
+  "Return overlays for the source row at POSITION, optionally in WINDOW."
+  (sort
+   (seq-filter
+    (lambda (overlay)
+      (and (<= (overlay-get overlay 'markdown-ts-appear-table--row-beg)
+               position)
+           (< position
+              (overlay-get overlay 'markdown-ts-appear-table--row-end))
+           (or (null window) (eq window (overlay-get overlay 'window)))))
+    (markdown-ts-appear-table-test--overlays))
+   (lambda (a b) (< (overlay-start a) (overlay-start b)))))
+
+(defun markdown-ts-appear-table-test--row-display-at (position &optional window)
+  "Return the complete rendered row at POSITION, optionally in WINDOW."
+  (mapconcat #'markdown-ts-appear-table-test--display
+             (markdown-ts-appear-table-test--row-overlays-at position window)
+             ""))
+
+(defun markdown-ts-appear-table-test--row-count (&optional overlays)
+  "Return the source-row count represented by OVERLAYS."
+  (length
+   (delete-dups
+    (mapcar
+     (lambda (overlay)
+       (overlay-get overlay 'markdown-ts-appear-table--row-beg))
+     (or overlays (markdown-ts-appear-table-test--overlays))))))
+
+(defun markdown-ts-appear-table-test--cursor-overlays ()
+  "Return interactive row overlays ordered by source position."
+  (sort (copy-sequence markdown-ts-appear-table--cursor-overlays)
+        (lambda (a b) (< (overlay-start a) (overlay-start b)))))
+
 (ert-deftest markdown-ts-appear-table-test-wraps-cjk-cell-without-editing-source ()
   (let ((source
          "| 名称 | Description |\n|---|---|\n| 中文 | This is a long cell that should wrap nicely |\n"))
     (markdown-ts-appear-table-test--with-buffer source 32
       (let ((overlays (markdown-ts-appear-table-test--overlays)))
-        (should (= 3 (length overlays)))
+        (should (= 3 (markdown-ts-appear-table-test--row-count overlays)))
+        (goto-char (point-min))
+        (search-forward "中文")
         (should
          (equal
           (substring-no-properties
-           (markdown-ts-appear-table-test--display (nth 2 overlays)))
+           (markdown-ts-appear-table-test--row-display-at (point)))
           (concat "│ 中文 │ This is a long cell   │\n"
                   "│      │ that should wrap      │\n"
                   "│      │ nicely                │\n")))
@@ -81,8 +116,9 @@
               "|---|---|\n"
               "| x | **bold text** and [link](https://example.com) |\n")
       26
-    (let* ((overlay (nth 2 (markdown-ts-appear-table-test--overlays)))
-           (display (markdown-ts-appear-table-test--display overlay))
+    (goto-char (point-min))
+    (search-forward "bold")
+    (let* ((display (markdown-ts-appear-table-test--row-display-at (point)))
            (bold (string-match "bold" display))
            (link (string-match "link" display)))
       (should (equal (substring-no-properties display)
@@ -99,11 +135,13 @@
               "Heading | This is a long status value\n")
       28
     (let ((overlays (markdown-ts-appear-table-test--overlays)))
-      (should (= 3 (length overlays)))
+      (should (= 3 (markdown-ts-appear-table-test--row-count overlays)))
+      (goto-char (point-min))
+      (search-forward "Heading")
       (should
        (equal
         (substring-no-properties
-         (markdown-ts-appear-table-test--display (nth 2 overlays)))
+         (markdown-ts-appear-table-test--row-display-at (point)))
         (concat "│ Heading │ This is a long │\n"
                 "│         │ status value   │\n"))))))
 
@@ -113,8 +151,9 @@
               "|---|---|\n"
               "| 👩‍💻 | 中文😀 escaped \\| pipe wraps here |\n")
       27
-    (let* ((overlay (nth 2 (markdown-ts-appear-table-test--overlays)))
-           (display (markdown-ts-appear-table-test--display overlay)))
+    (goto-char (point-min))
+    (search-forward "escaped")
+    (let ((display (markdown-ts-appear-table-test--row-display-at (point))))
       (should (string-match-p "中文😀 escaped |" display))
       (dolist (line (string-split display "\n" t))
         (should (= 27 (string-width line)))))))
@@ -129,25 +168,85 @@
     (goto-char (point-min))
     (search-forward "long")
     (run-hooks 'post-command-hook)
-    (let ((overlay (nth 2 (markdown-ts-appear-table-test--overlays)))
+    (let ((row-overlays
+           (markdown-ts-appear-table-test--row-overlays-at (point)))
           (source (buffer-string)))
-      (should-not (overlay-get overlay 'display))
+      (should (= 1 (length row-overlays)))
+      (should-not (seq-some (lambda (overlay) (overlay-get overlay 'display))
+                            row-overlays))
       (should (equal source (buffer-string)))
-      (markdown-ts-appear-stop)
-      ;; A replacing display string makes its underlying positions
-      ;; inaccessible.  Paused tracking must still expose the row at point.
-      (should-not (overlay-get overlay 'display))
-      (let ((position (point)))
-        (forward-char)
-        (should (= (1+ position) (point))))
-      (goto-char (point-max))
-      (run-hooks 'post-command-hook)
-      (should (equal (overlay-get overlay 'display)
-                     (markdown-ts-appear-table-test--display overlay)))
-      (goto-char (point-min))
-      (search-forward "long")
-      (markdown-ts-appear-start)
-      (should-not (overlay-get overlay 'display)))))
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (markdown-ts-appear-stop)
+        (dolist (overlay row-overlays)
+          (should (eq (overlay-get overlay 'display)
+                      (markdown-ts-appear-table-test--display overlay))))
+        (let ((cursor-overlays
+               (markdown-ts-appear-table-test--cursor-overlays)))
+          (should (= (- (overlay-end (car row-overlays))
+                        (overlay-start (car row-overlays)))
+                     (length cursor-overlays)))
+          (dolist (overlay cursor-overlays)
+            (should (= 1 (- (overlay-end overlay) (overlay-start overlay))))
+            (let ((display (overlay-get overlay 'display)))
+              (should (> (length display) 0))
+              (should (get-text-property 0 'cursor display)))))
+        (goto-char (overlay-start (car row-overlays)))
+        (let ((position (point)))
+          (local-set-key (kbd "C-f") #'forward-char)
+          (dotimes (_ 5)
+            (execute-kbd-macro (kbd "C-f")))
+          (should (= (+ 5 position) (point))))
+        (goto-char (point-min))
+        (search-forward "long")
+        (markdown-ts-appear-start)
+        (should-not markdown-ts-appear-table--cursor-overlays)
+        (should-not
+         (seq-some (lambda (overlay) (overlay-get overlay 'display))
+                   row-overlays))))))
+
+(ert-deftest markdown-ts-appear-table-test-motion-does-not-rebuild-tables ()
+  (markdown-ts-appear-table-test--with-buffer
+      (concat "| A | Description |\n"
+              "|---|---|\n"
+              "| x | This is a long cell that should wrap |\n")
+      25
+    (markdown-ts-appear-stop)
+    (goto-char (point-min))
+    (search-forward "long")
+    (let* ((row-overlays
+            (markdown-ts-appear-table-test--row-overlays-at (point)))
+           (beg (overlay-get (car row-overlays)
+                             'markdown-ts-appear-table--row-beg))
+           (end (overlay-get (car row-overlays)
+                             'markdown-ts-appear-table--row-end))
+           (renders 0))
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (cl-letf (((symbol-function 'markdown-ts-appear-table--render)
+                   (lambda (&rest _) (setq renders (1+ renders)))))
+          (run-hooks 'post-command-hook)
+          (let ((cursor-overlays
+                 (markdown-ts-appear-table-test--cursor-overlays)))
+            (dotimes (offset (- end beg))
+              (goto-char (+ beg offset))
+              (run-hooks 'post-command-hook)
+              (should (equal cursor-overlays
+                              (markdown-ts-appear-table-test--cursor-overlays))))))
+      (should (= 0 renders))))))
+
+(ert-deftest markdown-ts-appear-table-test-cursor-chunks-handle-hidden-source ()
+  (let* ((chunks (markdown-ts-appear-table--cursor-chunks "a😀\n" 8))
+         (display (apply #'concat chunks)))
+    (should (= 8 (length chunks)))
+    (should (equal "a😀\n"
+                   (string-replace (string #x200b) "" display)))
+    (cl-loop for (chunk next) on chunks while next
+             do (should-not (eq chunk next)))
+    (should (cl-every (lambda (chunk)
+                        (and (> (length chunk) 0)
+                             (get-text-property 0 'cursor chunk)))
+                      chunks))))
 
 (ert-deftest markdown-ts-appear-table-test-rebuilds-after-edit ()
   (markdown-ts-appear-table-test--with-buffer
@@ -160,8 +259,7 @@
     (should markdown-ts-appear-table--dirty)
     (should-not markdown-ts-appear-table--overlays)
     (run-hooks 'post-command-hook)
-    (let* ((overlay (nth 2 (markdown-ts-appear-table-test--overlays)))
-           (display (markdown-ts-appear-table-test--display overlay)))
+    (let ((display (markdown-ts-appear-table-test--row-display-at (point))))
       (should-not markdown-ts-appear-table--dirty)
       (should (string-match-p "updated" display))
       (should (string-match-p "long value" display)))))
@@ -174,12 +272,45 @@
     (should (memq #'markdown-ts-appear-table--post-command post-command-hook))
     (should (memq #'markdown-ts-appear-table--after-change
                   after-change-functions))
-    (markdown-ts-appear-mode -1)
-    (should-not markdown-ts-appear-table--overlays)
-    (should-not (memq #'markdown-ts-appear-table--post-command
-                      post-command-hook))
-    (should-not (memq #'markdown-ts-appear-table--after-change
-                      after-change-functions))))
+    (should (memq #'markdown-ts-appear-table--selection-change
+                  window-selection-change-functions))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (markdown-ts-appear-stop)
+      (goto-char (point-min))
+      (run-hooks 'post-command-hook)
+      (should markdown-ts-appear-table--cursor-overlays)
+      (markdown-ts-appear-mode -1)
+      (should-not markdown-ts-appear-table--overlays)
+      (should-not markdown-ts-appear-table--cursor-overlays)
+      (should-not (memq #'markdown-ts-appear-table--post-command
+                        post-command-hook))
+      (should-not (memq #'markdown-ts-appear-table--after-change
+                        after-change-functions))
+      (should-not (memq #'markdown-ts-appear-table--selection-change
+                        window-selection-change-functions)))))
+
+(ert-deftest markdown-ts-appear-table-test-deselect-cleans-cursor-overlays ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | y |\n"
+      20
+    (save-window-excursion
+      (let ((table-buffer (current-buffer))
+            (other-buffer (generate-new-buffer
+                           " *markdown-ts-appear-other*")))
+        (unwind-protect
+            (progn
+              (switch-to-buffer table-buffer)
+              (markdown-ts-appear-stop)
+              (goto-char (point-min))
+              (run-hooks 'post-command-hook)
+              (should markdown-ts-appear-table--cursor-overlays)
+              (switch-to-buffer other-buffer)
+              (with-current-buffer table-buffer
+                (markdown-ts-appear-table--selection-change
+                 (selected-window))
+                (should-not markdown-ts-appear-table--cursor-overlays)))
+          (kill-buffer other-buffer))))))
 
 (ert-deftest markdown-ts-appear-table-test-indirect-buffer-keeps-base-overlays ()
   (skip-unless (treesit-ready-p '(markdown markdown-inline)))
@@ -197,6 +328,8 @@
           (markdown-ts-appear-table--render 22)
           (let ((base-overlays (copy-sequence
                                 markdown-ts-appear-table--overlays)))
+            (should (= 3 (markdown-ts-appear-table-test--row-count
+                          base-overlays)))
             (should (= 3 (length base-overlays)))
             (setq indirect
                   (clone-indirect-buffer
@@ -237,7 +370,6 @@
             (markdown-ts-appear-table--render)
             (let ((windows (get-buffer-window-list buffer nil t)))
               (should (= 2 (length windows)))
-              (should (= 6 (length markdown-ts-appear-table--overlays)))
               (dolist (window windows)
                 (let ((overlays
                        (seq-filter
@@ -245,6 +377,8 @@
                           (eq window (overlay-get overlay 'window)))
                         markdown-ts-appear-table--overlays))
                       (width (markdown-ts-appear-table--window-width window)))
+                  (should (= 3 (markdown-ts-appear-table-test--row-count
+                                overlays)))
                   (should (= 3 (length overlays)))
                   (dolist (overlay overlays)
                     (dolist (line
