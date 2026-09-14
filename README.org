@@ -80,9 +80,12 @@ The ~wrapped~ table style displays canonical pipe-table source as a Unicode
 table fitted to each window.  Long cells wrap without changing buffer text;
 when source tracking is active, moving point into a row reveals it for editing.
 When tracking is paused, the row at point stays rendered while preserving
-normal cursor motion.  Resizing or editing rebuilds the view.  This integration
-currently uses an internal ~markdown-table-wrap~ rendering API while its public
-display API is finalized.
+the source position of each visible character, including across wrapped cells.
+Entering insert state edits that same source character.  Hidden markup uses
+the nearest visible character; normalized whitespace uses its display boundary.
+Only three additional overlays are needed for the active row.  Resizing or
+editing rebuilds the view.  This integration uses internal row-layout functions
+from ~markdown-table-wrap~ while its public display API is finalized.
 
 * Modal Editing
 
@@ -152,6 +155,10 @@ emacs --batch -Q -L . \
 Add ~MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1~ to require the optional math
 dependencies and real SVG rendering tests.  Without the corresponding
 environment variable, tests with unavailable dependencies are skipped.
+
+Run ~python3 test/table-redisplay.py~ to check actual terminal cursor positions
+and Evil insert transitions.  This uses a real PTY and the supplied three-column
+CJK regression table; it requires Python 3, Evil, and the Markdown grammars.
 
 * License
 

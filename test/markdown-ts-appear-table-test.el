@@ -91,6 +91,12 @@
   (sort (copy-sequence markdown-ts-appear-table--cursor-overlays)
         (lambda (a b) (< (overlay-start a) (overlay-start b)))))
 
+(defun markdown-ts-appear-table-test--cursor-character (overlay)
+  "Return the character actually carrying OVERLAY's cursor."
+  (let* ((display (overlay-get overlay 'display))
+         (offset (text-property-any 0 (length display) 'cursor t display)))
+    (substring display offset (1+ offset))))
+
 (ert-deftest markdown-ts-appear-table-test-wraps-cjk-cell-without-editing-source ()
   (let ((source
          "| 名称 | Description |\n|---|---|\n| 中文 | This is a long cell that should wrap nicely |\n"))
@@ -183,14 +189,12 @@
                       (markdown-ts-appear-table-test--display overlay))))
         (let ((cursor-overlays
                (markdown-ts-appear-table-test--cursor-overlays)))
-          (should (= (- (overlay-end (car row-overlays))
-                        (overlay-start (car row-overlays)))
-                     (length cursor-overlays)))
-          (dolist (overlay cursor-overlays)
-            (should (= 1 (- (overlay-end overlay) (overlay-start overlay))))
-            (let ((display (overlay-get overlay 'display)))
-              (should (> (length display) 0))
-              (should (get-text-property 0 'cursor display)))))
+          (should (= 3 (length cursor-overlays)))
+          (let* ((anchor (cadr cursor-overlays))
+                 (display (overlay-get anchor 'display)))
+            (should (= (point) (overlay-start anchor)))
+            (should (= 1 (- (overlay-end anchor) (overlay-start anchor))))
+            (should (text-property-any 0 (length display) 'cursor t display))))
         (goto-char (overlay-start (car row-overlays)))
         (let ((position (point)))
           (local-set-key (kbd "C-f") #'forward-char)
@@ -228,25 +232,137 @@
           (run-hooks 'post-command-hook)
           (let ((cursor-overlays
                  (markdown-ts-appear-table-test--cursor-overlays)))
-            (dotimes (offset (- end beg))
-              (goto-char (+ beg offset))
-              (run-hooks 'post-command-hook)
-              (should (equal cursor-overlays
-                              (markdown-ts-appear-table-test--cursor-overlays))))))
+            (cl-letf (((symbol-function 'markdown-ts-appear-table--source-map)
+                       (lambda (&rest _) (ert-fail "Motion rebuilt the source map")))
+                      ((symbol-function 'markdown-ts-appear-table--tables)
+                       (lambda (&rest _) (ert-fail "Motion scanned the document"))))
+              (dotimes (offset (- end beg))
+                (goto-char (+ beg offset))
+                (run-hooks 'post-command-hook)
+                (should (equal cursor-overlays
+                               (markdown-ts-appear-table-test--cursor-overlays)))))))
       (should (= 0 renders))))))
 
-(ert-deftest markdown-ts-appear-table-test-cursor-chunks-handle-hidden-source ()
-  (let* ((chunks (markdown-ts-appear-table--cursor-chunks "a😀\n" 8))
-         (display (apply #'concat chunks)))
-    (should (= 8 (length chunks)))
-    (should (equal "a😀\n"
-                   (string-replace (string #x200b) "" display)))
-    (cl-loop for (chunk next) on chunks while next
-             do (should-not (eq chunk next)))
-    (should (cl-every (lambda (chunk)
-                        (and (> (length chunk) 0)
-                             (get-text-property 0 'cursor chunk)))
-                      chunks))))
+(ert-deftest markdown-ts-appear-table-test-exact-source-through-inline-markup ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| **repeat** repeat | [repeat](repeat) `repeat` \\| 中文😀 |\n"
+      24
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (forward-line 2)
+      (markdown-ts-appear-stop)
+      (let* ((row (car (markdown-ts-appear-table-test--row-overlays-at (point))))
+             (display (markdown-ts-appear-table-test--display row))
+             (source (buffer-substring-no-properties (point-min) (point-max))))
+        (dotimes (index (length display))
+          (when-let* ((position (get-text-property
+                                index 'markdown-ts-appear-table--source display)))
+            (goto-char position)
+            (markdown-ts-appear-table--post-command)
+            (let ((anchor (cadr markdown-ts-appear-table--cursor-overlays)))
+              (should (or (= (char-after) (aref display index))
+                          (and (= (char-after) ?|) (= (aref display index) ?│))))
+              (should (= position (overlay-start anchor)))
+              (should (string-search
+                       (string (aref display index))
+                       (markdown-ts-appear-table-test--cursor-character anchor)))
+              (markdown-ts-appear-start)
+              (should (= position (point)))
+              (should-not (overlay-get row 'display))
+              (markdown-ts-appear-stop)
+              (should (= position (point))))))
+        (should (equal source (buffer-substring-no-properties (point-min) (point-max))))))))
+
+(ert-deftest markdown-ts-appear-table-test-space-retains-insertion-boundary ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| repeated words | repeated words |\n"
+      50
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (search-forward "repeated")
+      (markdown-ts-appear-stop)
+      (let* ((anchor (cadr markdown-ts-appear-table--cursor-overlays))
+             (display (overlay-get anchor 'display))
+             (offset (text-property-any 0 (length display) 'cursor t display)))
+        (should (equal " " (markdown-ts-appear-table-test--cursor-character anchor)))
+        (should (string-suffix-p "repeated" (substring display 0 offset)))
+        (should (string-prefix-p "words" (substring display (1+ offset))))))))
+
+(ert-deftest markdown-ts-appear-table-test-escaped-pipe-retains-face-and-source ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | **a\\|b** `c\\|d` |\n"
+      40
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (search-forward "a\\|")
+      (backward-char)
+      (markdown-ts-appear-stop)
+      (let ((display (markdown-ts-appear-table-test--cursor-character
+                      (cadr markdown-ts-appear-table--cursor-overlays))))
+        (should (equal "|" display))
+        (should (memq 'bold (ensure-list (get-text-property 0 'face display)))))
+      (search-forward "c\\|")
+      (backward-char)
+      (markdown-ts-appear-table--post-command)
+      (let ((display (markdown-ts-appear-table-test--cursor-character
+                      (cadr markdown-ts-appear-table--cursor-overlays))))
+        (should (equal "|" display))
+        (should (memq 'markdown-table-wrap-pretty-code-face
+                      (ensure-list (get-text-property 0 'face display))))))))
+
+(ert-deftest markdown-ts-appear-table-test-trailing-newline-is-outside-row ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | y |\n"
+      20
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (markdown-ts-appear-stop)
+      (should markdown-ts-appear-table--cursor-overlays)
+      (goto-char (point-max))
+      (markdown-ts-appear-table--post-command)
+      (should-not markdown-ts-appear-table--cursor-overlays))))
+
+(ert-deftest markdown-ts-appear-table-test-window-migration-and-layout-reuse ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| repeated words | 中文 long words that wrap |\n"
+      25
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let ((first (selected-window))
+            (second (split-window-right))
+            (cell-function (symbol-function 'markdown-ts-appear-table--cell))
+            (calls 0)
+            previous)
+        (set-window-buffer second (current-buffer))
+        (markdown-ts-appear-stop)
+        (cl-letf (((symbol-function 'markdown-ts-appear-table--cell)
+                   (lambda (node)
+                     (cl-incf calls)
+                     (funcall cell-function node))))
+          (markdown-ts-appear-table--render))
+        (should (= 4 calls))
+        (dolist (window (list first second first))
+          (select-window window)
+          (goto-char (point-min))
+          (search-forward "中文")
+          (backward-char 2)
+          (markdown-ts-appear-table--selection-change window)
+          (when previous
+            (should-not (seq-some #'overlay-buffer previous)))
+          (setq previous (copy-sequence markdown-ts-appear-table--cursor-overlays))
+          (should (= 3 (length previous)))
+          (should (cl-every (lambda (overlay) (eq window (overlay-get overlay 'window)))
+                            previous))
+          (should (equal "中" (markdown-ts-appear-table-test--cursor-character
+                                (cadr previous)))))
+        (markdown-ts-appear-table--render 20)
+        (should-not (seq-some #'overlay-buffer previous))
+        (should (equal "中" (markdown-ts-appear-table-test--cursor-character
+                              (cadr markdown-ts-appear-table--cursor-overlays))))))))
 
 (ert-deftest markdown-ts-appear-table-test-rebuilds-after-edit ()
   (markdown-ts-appear-table-test--with-buffer

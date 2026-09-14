@@ -95,7 +95,8 @@ jobs:
             (add-to-list 'package-archives
                          '(\"melpa\" . \"https://melpa.org/packages/\") t)
             (package-refresh-contents)
-            (package-install 'markdown-table-wrap))"
+            (package-install 'markdown-table-wrap)
+            (package-install 'evil))"
 
       - name: Install optional MathJax dependency
         if: matrix.mathjax
@@ -150,6 +151,9 @@ jobs:
             -l test/markdown-ts-appear-math-test.el \
             -l test/markdown-ts-appear-table-test.el \
             -f ert-run-tests-batch-and-exit
+
+      - name: Check real terminal cursor and Evil insert transitions
+        run: python3 test/table-redisplay.py
 
   package-lint:
     runs-on: ubuntu-latest
