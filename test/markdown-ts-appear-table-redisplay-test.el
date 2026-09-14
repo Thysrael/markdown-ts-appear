@@ -16,6 +16,9 @@
 (defvar markdown-ts-appear-table-redisplay--checks 0
   "Number of cursor checkpoints emitted to the PTY driver.")
 
+(defvar markdown-ts-appear-table-redisplay--references 0
+  "Serial number for native-text terminal cursor references.")
+
 (defun markdown-ts-appear-table-redisplay--cursor (expected)
   "Ask the PTY driver to check the actual terminal cursor against EXPECTED."
   (cl-incf markdown-ts-appear-table-redisplay--checks)
@@ -26,17 +29,24 @@
              (+ (car edges) (car expected))))))
 
 (defun markdown-ts-appear-table-redisplay--reference-position (display index)
-  "Measure DISPLAY at INDEX as ordinary text with no replacement overlays.
-Emacs 31's string-width can overcount a composed ZWJ emoji.  Native text
-redisplay provides an independent reference for the actual glyph geometry."
-  (save-window-excursion
-    (with-temp-buffer
-      (switch-to-buffer (current-buffer))
-      (insert display)
-      (goto-char (1+ index))
-      (set-window-start (selected-window) (point-min))
-      (redisplay t)
-      (posn-x-y (posn-at-point)))))
+  "Record DISPLAY at INDEX as ordinary text with no replacement overlays.
+Emacs 31's string-width and posn-at-point both overcount composed ZWJ emoji.
+Have the PTY driver capture the actual native-text cursor instead."
+  (let ((reference (cl-incf markdown-ts-appear-table-redisplay--references)))
+    (save-window-excursion
+      (with-temp-buffer
+        (switch-to-buffer (current-buffer))
+        (insert display)
+        (goto-char (1+ index))
+        (set-window-start (selected-window) (point-min))
+        (redisplay t)
+        (send-string-to-terminal (format "\e]777;reference;%d\a" reference))))
+    reference))
+
+(defun markdown-ts-appear-table-redisplay--compare-reference (reference)
+  "Compare the actual rendered cursor with native-text REFERENCE."
+  (cl-incf markdown-ts-appear-table-redisplay--checks)
+  (send-string-to-terminal (format "\e]777;compare;%d\a" reference)))
 
 (defconst markdown-ts-appear-table-redisplay--example
   (with-temp-buffer
@@ -165,7 +175,7 @@ redisplay provides an independent reference for the actual glyph geometry."
                 (markdown-ts-appear-table--post-command)
                 (set-window-start (selected-window) (overlay-start row))
                 (redisplay t)
-                (markdown-ts-appear-table-redisplay--cursor expected)))
+                (markdown-ts-appear-table-redisplay--compare-reference expected)))
             (goto-char (point-max))
             (markdown-ts-appear-table--post-command)
             (redisplay t)
@@ -176,7 +186,7 @@ redisplay provides an independent reference for the actual glyph geometry."
               (markdown-ts-appear-table--post-command)
               (set-window-start (selected-window) (overlay-start row))
               (redisplay t)
-              (markdown-ts-appear-table-redisplay--cursor expected)))
+              (markdown-ts-appear-table-redisplay--compare-reference expected)))
         (markdown-ts-appear-mode -1)))))
 
 (defun markdown-ts-appear-table-redisplay-run ()

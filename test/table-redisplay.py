@@ -24,6 +24,7 @@ class Cursor:
         self.checks = 0
         self.expected_checks = None
         self.errors = []
+        self.references = {}
 
     def feed(self, text):
         self.pending += text
@@ -61,8 +62,14 @@ class Cursor:
                     if end < 0:
                         return
                     payload = self.pending[2:end]
-                    if payload.startswith("777;cursor;"):
-                        expected = tuple(map(int, payload.split(";")[2:]))
+                    if payload.startswith("777;reference;"):
+                        self.references[int(payload.split(";")[2])] = (self.row, self.col)
+                    elif payload.startswith(("777;cursor;", "777;compare;")):
+                        expected = (
+                            self.references.pop(int(payload.split(";")[2]))
+                            if payload.startswith("777;compare;")
+                            else tuple(map(int, payload.split(";")[2:]))
+                        )
                         self.checks += 1
                         if expected != (self.row, self.col):
                             self.errors.append((self.checks, expected, (self.row, self.col)))
@@ -135,7 +142,8 @@ def main():
         else:
             raise TimeoutError("Emacs redisplay regression timed out")
         code = process.wait(timeout=5)
-        if code or cursor.errors or cursor.checks == 0 or cursor.checks != cursor.expected_checks:
+        if (code or cursor.errors or cursor.references or cursor.checks == 0
+                or cursor.checks != cursor.expected_checks):
             print("".join(transcript)[-8000:])
             raise AssertionError(
                 f"exit={code}, checkpoints={cursor.checks}, mismatches={cursor.errors[:20]}"
