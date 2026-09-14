@@ -88,11 +88,22 @@ jobs:
             (unless (treesit-ready-p '(markdown markdown-inline c))
               (error \"Required Tree-sitter grammars are unavailable\"))))"
 
+      - name: Install required package dependencies
+        run: |
+          emacs --batch -Q --eval "(progn
+            (require 'package)
+            (add-to-list 'package-archives
+                         '(\"melpa\" . \"https://melpa.org/packages/\") t)
+            (package-refresh-contents)
+            (package-install 'markdown-table-wrap))"
+
       - name: Install optional MathJax dependency
         if: matrix.mathjax
         run: |
           emacs --batch -Q --eval "(progn
             (require 'package)
+            (add-to-list 'package-archives
+                         '(\"melpa\" . \"https://melpa.org/packages/\") t)
             (package-refresh-contents)
             (package-install 'mathjax)
             (unless (image-type-available-p 'svg)
@@ -104,15 +115,24 @@ jobs:
       - name: Byte-compile
         run: |
           emacs --batch -Q -L . \
+            --eval '(progn (require (quote package)) (package-initialize))' \
             --eval '(setq byte-compile-error-on-warn t)' \
-            -f batch-byte-compile markdown-ts-appear.el
+            -f batch-byte-compile \
+            markdown-ts-appear-math.el \
+            markdown-ts-appear-table.el \
+            markdown-ts-appear.el
 
       - name: Check documentation
         run: |
           emacs --batch -Q --eval "(progn
+            (require 'package)
+            (package-initialize)
             (require 'checkdoc)
-            (find-file \"markdown-ts-appear.el\")
-            (checkdoc-current-buffer t)
+            (dolist (file '(\"markdown-ts-appear.el\"
+                            \"markdown-ts-appear-math.el\"
+                            \"markdown-ts-appear-table.el\"))
+              (find-file file)
+              (checkdoc-current-buffer t))
             (when-let* ((warnings (get-buffer \"*Warnings*\"))
                         ((> (buffer-size warnings) 0)))
               (with-current-buffer warnings
@@ -128,6 +148,7 @@ jobs:
             --eval '(progn (require (quote package)) (package-initialize))' \
             -l test/markdown-ts-appear-test.el \
             -l test/markdown-ts-appear-math-test.el \
+            -l test/markdown-ts-appear-table-test.el \
             -f ert-run-tests-batch-and-exit
 
   package-lint:

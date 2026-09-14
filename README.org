@@ -13,12 +13,13 @@ rendered appearance when point leaves.  This minor mode extends the built-in
 ~markdown-ts-mode~ without changing buffer text.
 
 Optional features include link icons, code fences, quote markers, callout
-labels, table borders, and MathJax previews.
+labels, width-aware table views, and MathJax previews.
 
 * Requirements
 
 - Emacs 31.1+ with Tree-sitter support.
 - The ~markdown~ and ~markdown-inline~ grammars.
+- ~markdown-table-wrap~ 0.2.0+.
 - For math previews: the ~mathjax~ package, Node.js, and an Emacs build with SVG
   image support.
 
@@ -53,7 +54,8 @@ For optional math previews, also install ~mathjax~ and enable the option below:
 | ~markdown-ts-appear-code-fence-style~    | ~raw~   | ~raw~ or ~connected~ fences with a language label.       |
 | ~markdown-ts-appear-block-quote-marker~  | ~nil~   | Replacement string; ~nil~ keeps the original marker.     |
 | ~markdown-ts-appear-render-callouts~     | ~nil~   | ~t~ renders callout labels; does not implement folding.  |
-| ~markdown-ts-appear-table-style~         | ~raw~   | ~raw~ or ~unicode~ delimiters; does not align the table. |
+| ~markdown-ts-appear-table-style~         | ~raw~   | ~raw~, ~unicode~, or width-aware ~wrapped~ tables.       |
+| ~markdown-ts-appear-table-wrap-resize-delay~ | ~0.2~ | Seconds to debounce ~wrapped~ table resize rendering. |
 
 Disable and re-enable ~markdown-ts-appear-mode~ after changing structural or
 math options in an active buffer.
@@ -73,6 +75,12 @@ Configure ordinary colors and fonts through ~markdown-ts-mode~ faces, such as
 ~markdown-ts-code-block~, ~markdown-ts-block-quote~, and ~markdown-ts-table~.
 Use ~markdown-ts-table-auto-align~ for table alignment and
 ~markdown-ts-inline-images~ to display image files.
+
+The ~wrapped~ table style displays canonical pipe-table source as a Unicode
+table fitted to each window.  Long cells wrap without changing buffer text;
+moving point into a source row reveals that row for editing.  Resizing or
+editing rebuilds the view.  This integration currently uses an internal
+~markdown-table-wrap~ rendering API while its public display API is finalized.
 
 * Modal Editing
 
@@ -135,6 +143,7 @@ emacs --batch -Q -L . \
   -l ./markdown-ts-appear.el \
   -l test/markdown-ts-appear-test.el \
   -l test/markdown-ts-appear-math-test.el \
+  -l test/markdown-ts-appear-table-test.el \
   -f ert-run-tests-batch-and-exit
 #+end_src
 
