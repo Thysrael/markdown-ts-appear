@@ -25,6 +25,19 @@
              (+ (nth 1 edges) (cdr expected))
              (+ (car edges) (car expected))))))
 
+(defun markdown-ts-appear-table-redisplay--reference-position (display index)
+  "Measure DISPLAY at INDEX as ordinary text with no replacement overlays.
+Emacs 31's string-width can overcount a composed ZWJ emoji.  Native text
+redisplay provides an independent reference for the actual glyph geometry."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (insert display)
+      (goto-char (1+ index))
+      (set-window-start (selected-window) (point-min))
+      (redisplay t)
+      (posn-x-y (posn-at-point)))))
+
 (defconst markdown-ts-appear-table-redisplay--example
   (with-temp-buffer
     (insert-file-contents
@@ -147,19 +160,23 @@
               (let* ((row (nth 3 markdown-ts-appear-table--cursor-row))
                      (display (overlay-get row 'markdown-ts-appear-table--display))
                      (index (string-match (regexp-quote token) display))
-                     (lines (split-string (substring display 0 index) "\n")))
+                     (expected (markdown-ts-appear-table-redisplay--reference-position
+                                display index)))
+                (markdown-ts-appear-table--post-command)
                 (set-window-start (selected-window) (overlay-start row))
                 (redisplay t)
-                (markdown-ts-appear-table-redisplay--cursor
-                 (cons (string-width (car (last lines))) (1- (length lines))))))
+                (markdown-ts-appear-table-redisplay--cursor expected)))
             (goto-char (point-max))
             (markdown-ts-appear-table--post-command)
             (redisplay t)
             (let* ((row (nth 3 markdown-ts-appear-table--cursor-row))
                    (display (overlay-get row 'markdown-ts-appear-table--display))
-                   (lines (split-string display "\n")))
-              (markdown-ts-appear-table-redisplay--cursor
-               (cons (string-width (car (last lines))) (1- (length lines))))))
+                   (expected (markdown-ts-appear-table-redisplay--reference-position
+                              display (length display))))
+              (markdown-ts-appear-table--post-command)
+              (set-window-start (selected-window) (overlay-start row))
+              (redisplay t)
+              (markdown-ts-appear-table-redisplay--cursor expected)))
         (markdown-ts-appear-mode -1)))))
 
 (defun markdown-ts-appear-table-redisplay-run ()
