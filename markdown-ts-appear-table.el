@@ -638,14 +638,16 @@ NOERROR and REST retain the native command's boundary behavior and options."
                (complete t))
           (setq temporary-goal-column column)
           (if line-move-visual
-              (catch 'boundary
-                (dotimes (_ (abs count))
-                  (let ((position (point)))
-                    (markdown-ts-appear-table--visual-step
-                     function (if (< count 0) -1 1) column noerror rest)
-                    (when (= position (point))
-                      (setq complete nil)
-                      (throw 'boundary nil)))))
+              (if (= count 0)
+                  (markdown-ts-appear-table--visual-step function 0 column noerror rest)
+                (catch 'boundary
+                  (dotimes (_ (abs count))
+                    (let ((position (point)))
+                      (markdown-ts-appear-table--visual-step
+                       function (if (< count 0) -1 1) column noerror rest)
+                      (when (= position (point))
+                        (setq complete nil)
+                        (throw 'boundary nil))))))
             (let ((remaining (forward-line count)))
               ;; Native callers such as `move-end-of-line' deliberately
               ;; overshoot a narrowed buffer with NOERROR.  Keep its boundary

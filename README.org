@@ -76,6 +76,21 @@ Configure ordinary colors and fonts through ~markdown-ts-mode~ faces, such as
 Use ~markdown-ts-table-auto-align~ for table alignment and
 ~markdown-ts-inline-images~ to display image files.
 
+With ~markdown-ts-inline-images~ enabled, local images on their own lines are
+displayed as cached image slices in graphical Emacs.  Use relative or absolute
+paths in ~![description](path)~ links.  Small images are shown in full; tall
+images use a preview no taller than about half the window, with a visible row
+range.  Visual-line motions (~j/k~ when configured for visual lines)
+move through the slices, scrolling the preview as needed.  Clicking a slice
+selects it.  Source tracking reveals the original image link for editing.
+
+Set buffer-local ~line-spacing~ to ~0~ for seamless slices; Emacs otherwise
+adds the configured prose spacing between them.  ~markdown-ts-image-max-width~
+controls image width.  Window resizing reuses cached file data.  Toggle
+~markdown-ts-toggle-inline-images~ off and on to refresh changed image files.
+Remote images and images embedded within prose retain native handling rather
+than the sliced block-image view.  Wrapped table cells keep image labels.
+
 The ~wrapped~ table style displays canonical pipe-table source as a Unicode
 table fitted to each window.  Long cells wrap without changing buffer text;
 when source tracking is active, moving point into a row reveals it for editing.
@@ -156,6 +171,7 @@ emacs --batch -Q -L . \
   -l ./markdown-ts-appear.el \
   -l test/markdown-ts-appear-test.el \
   -l test/markdown-ts-appear-math-test.el \
+  -l test/markdown-ts-appear-image-test.el \
   -l test/markdown-ts-appear-table-test.el \
   -f ert-run-tests-batch-and-exit
 #+end_src
@@ -167,6 +183,16 @@ environment variable, tests with unavailable dependencies are skipped.
 Run ~python3 test/table-redisplay.py~ to check actual terminal cursor positions
 and Evil insert transitions.  This uses a real PTY and the supplied three-column
 CJK regression table; it requires Python 3, Evil, and the Markdown grammars.
+
+~test/markdown-ts-appear-image-test.el~ also includes real GUI image-geometry
+checks.  To run them in a disposable graphical Emacs (not ~--batch~):
+
+#+begin_src shell
+emacs -Q \
+  --eval '(progn (require (quote package)) (package-initialize))' \
+  -L . -l test/markdown-ts-appear-image-test.el \
+  -f markdown-ts-appear-image-test-run-gui
+#+end_src
 
 ~test/benchmark-table.el~ measures cold row entry, cached motion, and unchanged
 window notifications.  Initialize packages and put the library to measure first

@@ -119,6 +119,7 @@ jobs:
             --eval '(progn (require (quote package)) (package-initialize))' \
             --eval '(setq byte-compile-error-on-warn t)' \
             -f batch-byte-compile \
+            markdown-ts-appear-image.el \
             markdown-ts-appear-math.el \
             markdown-ts-appear-table.el \
             markdown-ts-appear.el
@@ -130,6 +131,7 @@ jobs:
             (package-initialize)
             (require 'checkdoc)
             (dolist (file '(\"markdown-ts-appear.el\"
+                            \"markdown-ts-appear-image.el\"
                             \"markdown-ts-appear-math.el\"
                             \"markdown-ts-appear-table.el\"))
               (find-file file)
@@ -149,6 +151,7 @@ jobs:
             --eval '(progn (require (quote package)) (package-initialize))' \
             -l test/markdown-ts-appear-test.el \
             -l test/markdown-ts-appear-math-test.el \
+            -l test/markdown-ts-appear-image-test.el \
             -l test/markdown-ts-appear-table-test.el \
             -f ert-run-tests-batch-and-exit
 
@@ -156,6 +159,15 @@ jobs:
         run: |
           python3 -B -m unittest discover -s test -p 'test_*.py'
           python3 test/table-redisplay.py
+
+      - name: Check graphical image geometry and navigation
+        if: matrix.mathjax
+        timeout-minutes: 3
+        run: |
+          emacs -Q \
+            --eval '(progn (require (quote package)) (package-initialize))' \
+            -L . -l test/markdown-ts-appear-image-test.el \
+            -f markdown-ts-appear-image-test-run-gui
 
   package-lint:
     runs-on: ubuntu-latest
