@@ -34,7 +34,7 @@
 (cl-defstruct (markdown-ts-appear-image--view
                (:constructor markdown-ts-appear-image--make-view))
   "Window-specific slices of OWNER, all sharing IMAGE."
-  owner window overlay image key slices text index (top 0) rows)
+  owner window overlay image key slices tiles breaks index (top 0) rows)
 
 (defvar-local markdown-ts-appear-image--objects nil
   "Source anchor overlays for discovered local block images.")
@@ -115,23 +115,19 @@
   "Show VIEW's cached slices, or hide them when its source is revealed."
   (let* ((overlay (markdown-ts-appear-image--view-overlay view))
          (index (markdown-ts-appear-image--view-index view))
-         (state (if (markdown-ts-appear-image--visible-p
-                     (markdown-ts-appear-image--view-owner view))
-                    (or index 'passive) 'hidden)))
-    (unless (equal state (overlay-get overlay 'markdown-ts-appear-image--state))
-      (let* ((text (markdown-ts-appear-image--view-text view))
-             (count (length (markdown-ts-appear-image--view-slices view)))
-             (rows (markdown-ts-appear-image--view-rows view))
-             (top (markdown-ts-appear-image--view-top view))
-             (offset (and (integerp state) (1+ (* 2 state)))))
-        (when offset
-          (setq top (max 0 (min top index)))
-          (when (>= index (+ top rows)) (setq top (1+ (- index rows)))))
-        (setq top (min top (max 0 (- count rows))))
-        (setf (markdown-ts-appear-image--view-top view) top)
-        (let* ((start (1+ (* 2 top)))
-               (end (* 2 (min count (+ top rows))))
-               (prefix
+         (count (length (markdown-ts-appear-image--view-slices view)))
+         (rows (markdown-ts-appear-image--view-rows view))
+         (top (markdown-ts-appear-image--view-top view))
+         (visible (markdown-ts-appear-image--visible-p
+                   (markdown-ts-appear-image--view-owner view))))
+    (when index
+      (setq top (max 0 (min top index)))
+      (when (>= index (+ top rows)) (setq top (1+ (- index rows)))))
+    (setq top (min top (max 0 (- count rows))))
+    (setf (markdown-ts-appear-image--view-top view) top)
+    (let ((state (if visible top 'hidden)))
+      (unless (equal state (overlay-get overlay 'markdown-ts-appear-image--state))
+        (let ((prefix
                 (if (< rows count)
                     (let* ((digits (length (number-to-string count)))
                            (label (format (format " [%%%dd-%%%dd/%d]\n" digits digits count)
@@ -141,18 +137,37 @@
                           (propertize label 'face 'shadow)
                         "\n"))
                   "\n")))
-          ;; A before-string on hidden Markdown punctuation is itself skipped.
-          ;; The non-hidden category overrides that punctuation while the image
-          ;; replaces it; the source's original invisibility is never modified.
-          (overlay-put overlay 'invisible (and offset 'markdown-ts-appear-image--anchor))
+          (overlay-put overlay 'invisible (and visible 'markdown-ts-appear-image--anchor))
+          (overlay-put overlay 'display (and visible "\n"))
           (overlay-put overlay 'before-string
-                       (and offset (concat prefix (substring text start offset))))
-          (overlay-put overlay 'display
-                       (and offset (aref (markdown-ts-appear-image--view-slices view) index)))
-          (overlay-put overlay 'after-string
-                       (cond (offset (substring text (1+ offset) end))
-                             ((eq state 'passive) (concat prefix (substring text start end)))))
+                       (and visible (> (length prefix) 1) (substring prefix 0 -1)))
+          (seq-doseq (separator (markdown-ts-appear-image--view-breaks view))
+            (overlay-put separator 'invisible (and visible 'markdown-ts-appear-image--anchor))
+            (overlay-put separator 'display
+                         (and visible (propertize "\n" 'line-height t 'line-spacing 0
+                                                  'face 'default))))
+          (cl-loop for tile across (markdown-ts-appear-image--view-tiles view)
+                   for row from 0
+                   do (overlay-put tile 'invisible
+                                   (and visible 'markdown-ts-appear-image--anchor))
+                   do (overlay-put tile 'display
+                                   (and visible (aref (markdown-ts-appear-image--view-slices view)
+                                                      (+ top row))))
+                   do (overlay-put tile 'markdown-ts-appear-image--slice (+ top row)))
           (overlay-put overlay 'markdown-ts-appear-image--state state))))))
+
+(defun markdown-ts-appear-image--delete-view (view)
+  "Delete VIEW's separator and individually anchored image tiles."
+  (delete-overlay (markdown-ts-appear-image--view-overlay view))
+  (seq-doseq (tile (markdown-ts-appear-image--view-tiles view)) (delete-overlay tile))
+  (seq-doseq (separator (markdown-ts-appear-image--view-breaks view)) (delete-overlay separator)))
+
+(defun markdown-ts-appear-image--tile (view position)
+  "Make a window-local display overlay for VIEW at POSITION."
+  (let ((tile (make-overlay position (1+ position) nil t nil)))
+    (dolist (property '(window priority face keymap help-echo markdown-ts-appear-image--view))
+      (overlay-put tile property (overlay-get (markdown-ts-appear-image--view-overlay view) property)))
+    tile))
 
 (defun markdown-ts-appear-image--clear-cursor ()
   "Restore the selected image to its passive display."
@@ -167,7 +182,7 @@
   (dolist (view (overlay-get owner 'markdown-ts-appear-image--views))
     (when (eq view markdown-ts-appear-image--cursor)
       (setq markdown-ts-appear-image--cursor nil))
-    (delete-overlay (markdown-ts-appear-image--view-overlay view)))
+    (markdown-ts-appear-image--delete-view view))
   (delete-overlay owner)
   (setq markdown-ts-appear-image--objects (delq owner markdown-ts-appear-image--objects)))
 
@@ -186,38 +201,49 @@
              (overlay (markdown-ts-appear-image--view-overlay view))
              (old-count (length (markdown-ts-appear-image--view-slices view)))
              (old-index (markdown-ts-appear-image--view-index view))
-             pieces slices)
+             (cursor-p (and old-index (eq view markdown-ts-appear-image--cursor)
+                            (eq window (selected-window))
+                            (eq view (get-char-property (point) 'markdown-ts-appear-image--view))
+                            (eql old-index (get-char-property (point) 'markdown-ts-appear-image--slice))))
+             slices)
         (cl-loop with rows = (max 1 (/ h height))
                  for index below rows
                  for y = (/ (* index h) rows)
                  for next-y = (/ (* (1+ index) h) rows)
                  for slice = `((slice 0 ,y ,w ,(- next-y y)) ,image)
-                 do (push slice slices)
-                  do (push (propertize " " 'display slice 'face 'default
-                                      'keymap markdown-ts-appear-image--map
-                                      'markdown-ts-appear-image--view view
-                                      'markdown-ts-appear-image--slice index)
-                          pieces))
+                 do (push slice slices))
         (setq slices (vconcat (nreverse slices)))
-        ;; Keep the active before-string comfortably inside a window.  An
-        ;; unbounded one can trigger native bidi iterator assertions when
-        ;; redisplay tries to scroll to its source anchor (Emacs 32).
+        ;; Each visible tile has its own real buffer position.  Redisplay can
+        ;; start at any tile instead of skipping one multi-line display string.
         (setf (markdown-ts-appear-image--view-image view) image
               (markdown-ts-appear-image--view-key view) key
               (markdown-ts-appear-image--view-slices view) slices
               (markdown-ts-appear-image--view-rows view)
-              (min (length slices) (max 1 (/ body-height 2 (ceiling h (length slices)))))
-              (markdown-ts-appear-image--view-text view)
-              (concat "\n" (mapconcat #'identity (nreverse pieces)
-                                       (propertize "\n" 'line-height t 'line-spacing 0
-                                                   'face 'default))))
+              (min (length slices)
+                   (/ (1+ (- (overlay-end (markdown-ts-appear-image--view-owner view))
+                             (overlay-end overlay))) 2)
+                   (max 1 (/ body-height 2 (ceiling h (length slices))))))
+        (seq-doseq (tile (markdown-ts-appear-image--view-tiles view)) (delete-overlay tile))
+        (seq-doseq (separator (markdown-ts-appear-image--view-breaks view)) (delete-overlay separator))
+        (let ((rows (markdown-ts-appear-image--view-rows view)) tiles breaks)
+          (dotimes (row rows)
+            (let ((position (if (= row (1- rows))
+                                (1- (overlay-end (markdown-ts-appear-image--view-owner view)))
+                              (+ (overlay-end overlay) (* 2 row)))))
+              (push (markdown-ts-appear-image--tile view position) tiles)
+              (when (< row (1- rows))
+                (push (markdown-ts-appear-image--tile view (1+ position)) breaks))))
+          (setf (markdown-ts-appear-image--view-tiles view) (vconcat (nreverse tiles))
+                (markdown-ts-appear-image--view-breaks view) (vconcat (nreverse breaks))))
         (when (> old-count 0)
           (setf (markdown-ts-appear-image--view-top view)
                 (/ (* (markdown-ts-appear-image--view-top view) (length slices)) old-count)))
         (when old-index
           (setf (markdown-ts-appear-image--view-index view)
                 (min (/ (* old-index (length slices)) old-count) (1- (length slices)))))
-        (overlay-put overlay 'markdown-ts-appear-image--state 'uninitialized)))))
+        (overlay-put overlay 'markdown-ts-appear-image--state 'uninitialized)
+        (when cursor-p
+          (markdown-ts-appear-image--select view (markdown-ts-appear-image--view-index view)))))))
 
 (defun markdown-ts-appear-image--sync (owner)
   "Synchronize OWNER's cached previews with visibility and graphical windows."
@@ -229,7 +255,7 @@
           (push view views)
         (when (eq view markdown-ts-appear-image--cursor)
           (setq markdown-ts-appear-image--cursor nil))
-        (delete-overlay (markdown-ts-appear-image--view-overlay view))))
+        (markdown-ts-appear-image--delete-view view)))
     (when (and (markdown-ts-appear-image--visible-p owner) windows)
       (unless base
         (setq base (markdown-ts-appear-image--asset
@@ -241,8 +267,9 @@
                                  (eq window (markdown-ts-appear-image--view-window candidate)))
                                views)))
             (unless view
-              (let* ((end (overlay-end owner))
-                     (overlay (make-overlay (1- end) end nil t nil)))
+              (let* ((start (+ (overlay-start owner)
+                               (overlay-get owner 'markdown-ts-appear-image--separator)))
+                     (overlay (make-overlay start (1+ start) nil t nil)))
                 (overlay-put overlay 'window window)
                 (overlay-put overlay 'priority '(nil . 2))
                 (overlay-put overlay 'face 'default)
@@ -274,6 +301,9 @@
       (setq owner (make-overlay beg end nil t nil))
       (overlay-put owner 'markdown-ts-appear-image--source source)
       (overlay-put owner 'markdown-ts-appear-image--file file)
+      (overlay-put owner 'markdown-ts-appear-image--separator
+                   (- (treesit-node-start (treesit-search-subtree node "\\`link_destination\\'"))
+                      beg 1))
       (push owner markdown-ts-appear-image--objects))
     (when (and (markdown-ts-appear-image--visible-p owner)
                (markdown-ts-appear-image--windows))
@@ -282,7 +312,7 @@
           (dolist (view (overlay-get owner 'markdown-ts-appear-image--views))
             (when (eq view markdown-ts-appear-image--cursor)
               (setq markdown-ts-appear-image--cursor nil))
-            (delete-overlay (markdown-ts-appear-image--view-overlay view)))
+            (markdown-ts-appear-image--delete-view view))
           (overlay-put owner 'markdown-ts-appear-image--views nil)
           (overlay-put owner 'markdown-ts-appear-image--image image))))
     (markdown-ts-appear-image--sync owner)))
@@ -292,6 +322,11 @@
   (when (and markdown-ts-appear-image--cursor
              (not (markdown-ts-appear-image--visible-p
                    (markdown-ts-appear-image--view-owner markdown-ts-appear-image--cursor))))
+    ;; Tile anchors are display positions, not proportional editing positions.
+    (when (eq markdown-ts-appear-image--cursor
+              (get-char-property (point) 'markdown-ts-appear-image--view))
+      (goto-char (1- (overlay-end
+                     (markdown-ts-appear-image--view-owner markdown-ts-appear-image--cursor)))))
     (markdown-ts-appear-image--clear-cursor))
   (dolist (owner markdown-ts-appear-image--objects)
     (when (overlay-buffer owner) (markdown-ts-appear-image--sync owner))))
@@ -330,7 +365,10 @@
     (if (and (eq (selected-window) (markdown-ts-appear-image--view-window view))
              (eq (window-buffer (selected-window)) (current-buffer))
              (overlay-buffer (markdown-ts-appear-image--view-owner view))
-             (= (point) (1- (overlay-end (markdown-ts-appear-image--view-owner view))))
+             (= (point) (overlay-start
+                         (aref (markdown-ts-appear-image--view-tiles view)
+                               (- (markdown-ts-appear-image--view-index view)
+                                  (markdown-ts-appear-image--view-top view)))))
              (markdown-ts-appear-image--visible-p (markdown-ts-appear-image--view-owner view)))
         (setq disable-point-adjustment t)
       (markdown-ts-appear-image--clear-cursor))))
@@ -351,8 +389,9 @@
     (markdown-ts-appear-image--clear-cursor))
   (setq markdown-ts-appear-image--cursor view)
   (setf (markdown-ts-appear-image--view-index view) index)
-  (goto-char (1- (overlay-end (markdown-ts-appear-image--view-owner view))))
   (markdown-ts-appear-image--present view)
+  (goto-char (overlay-start (aref (markdown-ts-appear-image--view-tiles view)
+                                 (- index (markdown-ts-appear-image--view-top view)))))
   (setq disable-point-adjustment t)
   t)
 
@@ -365,8 +404,9 @@
          (view (if string
                    (get-text-property (cdr string) 'markdown-ts-appear-image--view (car string))
                  (get-char-property (posn-point position) 'markdown-ts-appear-image--view window)))
-         (index (and string (get-text-property
-                             (cdr string) 'markdown-ts-appear-image--slice (car string)))))
+         (index (if string (get-text-property
+                            (cdr string) 'markdown-ts-appear-image--slice (car string))
+                  (get-char-property (posn-point position) 'markdown-ts-appear-image--slice window))))
     (when (and view (window-live-p window)
                (overlay-buffer (markdown-ts-appear-image--view-overlay view)))
       (select-window window)
@@ -386,7 +426,7 @@ NOERROR and REST are the native line-motion arguments."
            (< (+ index step) (length (markdown-ts-appear-image--view-slices view))))
       (markdown-ts-appear-image--select view (+ index step)))
      ((and view (null index) (> step 0))
-      (markdown-ts-appear-image--select view 0))
+      (markdown-ts-appear-image--select view (markdown-ts-appear-image--view-top view)))
      ((and view index)
       (let ((owner (markdown-ts-appear-image--view-owner view)))
         (if (and (> step 0) (= (line-end-position) (point-max)))
@@ -402,7 +442,9 @@ NOERROR and REST are the native line-motion arguments."
           (when-let* ((target (markdown-ts-appear-image--view-at-point))
                       ((not (eq target view))))
             (markdown-ts-appear-image--select
-             target (1- (length (markdown-ts-appear-image--view-slices target))))))
+             target (or (get-char-property (point) 'markdown-ts-appear-image--slice)
+                        (+ (markdown-ts-appear-image--view-top target)
+                           (1- (markdown-ts-appear-image--view-rows target)))))))
         result)))))
 
 (defun markdown-ts-appear-image--line-move (function count &optional noerror &rest rest)
@@ -422,8 +464,34 @@ NOERROR and REST preserve native line-motion options."
           (when (> index 0) (setq last-command 'next-line))
           (unless (markdown-ts-appear-image--step function (if (< count 0) -1 1) noerror rest)
             (setq complete nil)
-            (throw 'boundary nil))))
+            (throw 'boundary nil))
+          (markdown-ts-appear-image--scroll-edge (if (< count 0) -1 1))))
       complete)))
+
+(defun markdown-ts-appear-image--scroll-edge (step)
+  "Scroll one visual STEP when movement crosses an image's top edge.
+Keep redisplay's conservative scrolling from coalescing the final image rows."
+  (let* ((window (selected-window))
+         (start (max (point-min) (min (point-max) (window-start window))))
+         (owner (seq-find
+                 (lambda (overlay) (overlay-get overlay 'markdown-ts-appear-image--source))
+                 (overlays-in (max (point-min) (- start 2))
+                              (min (point-max) (1+ start))))))
+    (when (and owner (markdown-ts-appear-image--visible-p owner))
+      (let* ((position (pos-visible-in-window-p (point) window t))
+             (height (window-font-height window))
+             (margin (* height (min scroll-margin
+                                    (floor (* maximum-scroll-margin (window-body-height window))))))
+             (scroll (if (> step 0)
+                         (or (null position)
+                             (> (+ (cadr position) height) (- (window-body-height window t) margin)))
+                       (or (null position) (< (cadr position) margin)))))
+        (when scroll
+          (let ((next (save-excursion
+                        (goto-char start)
+                        (vertical-motion step window)
+                        (point))))
+            (unless (= start next) (set-window-start window next))))))))
 
 (defun markdown-ts-appear-image--setup ()
   "Install the image lifecycle, using the native inline-image option."

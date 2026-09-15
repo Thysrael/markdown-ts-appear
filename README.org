@@ -78,11 +78,15 @@ Use ~markdown-ts-table-auto-align~ for table alignment and
 
 With ~markdown-ts-inline-images~ enabled, local images on their own lines are
 displayed as cached image slices in graphical Emacs.  Use relative or absolute
-paths in ~![description](path)~ links.  Small images are shown in full; tall
-images use a preview no taller than about half the window, with a visible row
-range.  Visual-line motions (~j/k~ when configured for visual lines)
+paths in ~![description](path)~ links.  Images that fit the preview are shown in
+full; larger images use a preview no taller than about half the window, with a
+visible row range.  Visual-line motions (~j/k~ when configured for visual lines)
 move through the slices, scrolling the preview as needed.  Clicking a slice
 selects it.  Source tracking reveals the original image link for editing.
+Visible slices have separate display anchors inside the existing link, so they
+can scroll through the window edge individually without inserting buffer text.
+Short link destinations also limit the preview height; all slices remain
+accessible with visual-line movement.
 
 Set buffer-local ~line-spacing~ to ~0~ for seamless slices; Emacs otherwise
 adds the configured prose spacing between them.  ~markdown-ts-image-max-width~
