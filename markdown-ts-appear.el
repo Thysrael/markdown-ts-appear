@@ -41,7 +41,6 @@
 (require 'seq)
 (require 'subr-x)
 (require 'markdown-ts-appear-math)
-(require 'markdown-ts-appear-image)
 
 ;;; Options and faces
 
@@ -532,7 +531,6 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
     (setq markdown-ts-appear--last-range-tick nil)
     (add-hook 'post-command-hook #'markdown-ts-appear--update nil t)
     (markdown-ts-appear--update)
-    (markdown-ts-appear-image--update)
     (markdown-ts-appear-table--update-visibility)))
 
 (defun markdown-ts-appear-stop ()
@@ -544,7 +542,6 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
   (setq markdown-ts-appear--last-range-line nil)
   (setq markdown-ts-appear--last-range-tick nil)
   (markdown-ts-appear--restore)
-  (markdown-ts-appear-image--update)
   (markdown-ts-appear-table--update-visibility))
 
 ;;; Fontification and decorations
@@ -907,20 +904,10 @@ at most one following space or tab and are not clipped to START or LIMIT."
   "Call FUNCTION for NODE without covering image source."
   (if (not (markdown-ts-appear--active-p))
       (apply function node override start limit rest)
-    (let* ((wrapped-p (and markdown-ts-inline-images
-                           (eq markdown-ts-appear-table-style 'wrapped)
-                           (markdown-ts-appear--node-ancestor
-                            (markdown-ts-appear--markdown-node-at (treesit-node-start node))
-                            "pipe_table")))
-           (file (and markdown-ts-inline-images (not wrapped-p)
-                      (markdown-ts-appear-image--file node)))
-           (markdown-ts-inline-images
-            (and markdown-ts-inline-images (not file) (not wrapped-p)
-                 (not (markdown-ts-appear--node-visible-p node)))))
-      (apply function node override start limit rest)
-      (when file
-        (let ((markdown-ts-inline-images t))
-          (markdown-ts-appear-image--fontify node file))))))
+    (let ((markdown-ts-inline-images
+           (and markdown-ts-inline-images
+                (not (markdown-ts-appear--node-visible-p node)))))
+      (apply function node override start limit rest))))
 
 (defun markdown-ts-appear--fontify-link
     (function node override start limit &rest rest)
@@ -1057,7 +1044,6 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (setq markdown-ts-appear-mode nil)
     (setq markdown-ts-appear--region nil)
     (markdown-ts-appear-table--detach)
-    (markdown-ts-appear-image--detach)
     (setq markdown-ts-appear-math--objects nil)
     (markdown-ts-appear-math--teardown)
     (setq local-minor-modes
@@ -1091,7 +1077,6 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (widen)
     (font-lock-flush (point-min) (point-max)))
   (markdown-ts-appear-start)
-  (markdown-ts-appear-image--setup)
   (markdown-ts-appear-table--setup)
   (when markdown-ts-appear-enable-math-preview
     (markdown-ts-appear-math--setup)))
@@ -1099,7 +1084,6 @@ Indirect buffers are otherwise unsupported and are not synchronized."
 (defun markdown-ts-appear--disable-buffer ()
   "Remove Markdown TS Appear integration from the current buffer."
   (markdown-ts-appear--remove-buffer-hooks)
-  (markdown-ts-appear-image--teardown)
   (markdown-ts-appear-math--teardown)
   (markdown-ts-appear-table--teardown)
   (markdown-ts-appear-stop)
@@ -1138,16 +1122,6 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
 
 ;;; Native fontifier advice
 
-(defun markdown-ts-appear--line-move (function count &optional noerror &rest rest)
-  "Dispatch COUNT lines through image and table displays or native FUNCTION.
-NOERROR and REST are passed through to the underlying motion."
-  (if (and markdown-ts-inline-images markdown-ts-appear-image--objects line-move-visual)
-      (apply #'markdown-ts-appear-image--line-move
-             (lambda (count &optional noerror &rest rest)
-               (apply #'markdown-ts-appear-table--line-move function count noerror rest))
-             count noerror rest)
-    (apply #'markdown-ts-appear-table--line-move function count noerror rest)))
-
 (defconst markdown-ts-appear--visible-fontifiers
   '(markdown-ts--fontify-atx-heading
     markdown-ts--fontify-setext-heading
@@ -1163,7 +1137,7 @@ NOERROR and REST are passed through to the underlying motion."
   "Markdown fontifiers that replace or hide source markup.")
 
 (defun markdown-ts-appear--advice-bindings ()
-  "Return fontification and display-motion functions with their package advice."
+  "Return fontification and table-motion functions with their package advice."
   (append
    `((markdown-ts--fontify-delimiter
       . ,#'markdown-ts-appear--fontify-delimiter)
@@ -1177,7 +1151,7 @@ NOERROR and REST are passed through to the underlying motion."
       . ,#'markdown-ts-appear--fontify-image)
      (markdown-ts--fontify-latex-block
       . ,#'markdown-ts-appear--fontify-node)
-     (line-move . ,#'markdown-ts-appear--line-move))
+     (line-move . ,#'markdown-ts-appear-table--line-move))
    (mapcar (lambda (function)
              (cons function #'markdown-ts-appear--fontify-visible-markup))
            markdown-ts-appear--visible-fontifiers)))
@@ -1206,7 +1180,7 @@ NOERROR and REST are passed through to the underlying motion."
         (advice-remove (car binding) (cdr binding))))))
 
 (defun markdown-ts-appear--install-advice ()
-  "Install Markdown fontification and display-motion advice."
+  "Install Markdown fontification and table-motion advice."
   (when-let* ((missing (markdown-ts-appear--missing-private-functions)))
     (error "Required private markdown-ts-mode functions are unavailable: %S"
            missing))
