@@ -190,7 +190,7 @@ checks.  To run them in a disposable graphical Emacs (not ~--batch~):
 #+begin_src shell
 emacs -Q \
   --eval '(progn (require (quote package)) (package-initialize))' \
-  -L . -l test/markdown-ts-appear-image-test.el \
+  -L "$PWD" -l "$PWD/test/markdown-ts-appear-image-test.el" \
   -f markdown-ts-appear-image-test-run-gui
 #+end_src
 

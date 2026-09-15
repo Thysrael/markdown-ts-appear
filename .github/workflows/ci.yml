@@ -166,8 +166,9 @@ jobs:
         run: |
           emacs -Q \
             --eval '(progn (require (quote package)) (package-initialize))' \
-            -L . -l test/markdown-ts-appear-image-test.el \
-            -f markdown-ts-appear-image-test-run-gui
+            -L "$PWD" -l "$PWD/test/markdown-ts-appear-image-test.el" \
+            -f markdown-ts-appear-image-test-run-gui \
+            -ApplePersistenceIgnoreState YES
 
   package-lint:
     runs-on: ubuntu-latest

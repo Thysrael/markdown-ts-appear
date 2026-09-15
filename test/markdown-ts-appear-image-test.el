@@ -305,7 +305,12 @@
     (kill-emacs 1))
   (set-frame-size (selected-frame) 100 30)
   (let* ((scroll-margin 5) (scroll-conservatively 101) (auto-window-vscroll nil)
-         (stats (ert-run-tests "markdown-ts-appear-image-test" #'ignore)))
+         (stats (ert-run-tests
+                 "markdown-ts-appear-image-test"
+                 (lambda (event &rest args)
+                   (when (memq event '(test-started test-ended))
+                     (princ (format "%s: %s\n" event (ert-test-name (cadr args)))
+                            'external-debugging-output))))))
     (dolist (test (ert-select-tests "markdown-ts-appear-image-test" t))
       (let ((result (ert-test-most-recent-result test)))
         (when (ert-test-failed-p result)
