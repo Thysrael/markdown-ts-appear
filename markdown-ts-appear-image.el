@@ -21,6 +21,7 @@
 (require 'subr-x)
 (require 'url-util)
 
+(declare-function image-size "image.c" (spec &optional pixels frame))
 (declare-function markdown-ts-appear--active-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--node-ancestor "markdown-ts-appear")
 (declare-function markdown-ts-appear--literal-block-at "markdown-ts-appear")
