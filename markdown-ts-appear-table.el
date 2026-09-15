@@ -66,7 +66,22 @@
   "Three display overlays anchoring the rendered row at point.")
 
 (defvar-local markdown-ts-appear-table--cursor-row nil
-  "Bounds and window of the rendered row made interactive at point.")
+  "Source-row overlay currently made interactive at point.")
+
+(cl-defstruct (markdown-ts-appear-table--layout
+               (:constructor markdown-ts-appear-table--make-layout))
+  "A row's display and lazily constructed, shared motion geometry."
+  display map lines)
+
+(cl-defstruct (markdown-ts-appear-table--line
+               (:constructor markdown-ts-appear-table--make-line))
+  "A visual line's string bounds, display width and source cursor stops."
+  beg end width stops)
+
+(cl-defstruct (markdown-ts-appear-table--position
+               (:constructor markdown-ts-appear-table--make-position))
+  "A source character's display bounds, visual line index and column."
+  beg end line column)
 
 (defvar-local markdown-ts-appear-table--dirty nil
   "Non-nil when wrapped tables need rebuilding after an edit.")
@@ -76,6 +91,9 @@
 
 (defvar-local markdown-ts-appear-table--resize-timer nil
   "Idle timer used to debounce wrapped-table rendering after resize.")
+
+(defvar-local markdown-ts-appear-table--windows nil
+  "Window widths and font attributes used by the last successful render.")
 
 (defun markdown-ts-appear--fontify-table-row (row start limit)
   "Render delimiter characters in table ROW between START and LIMIT."
@@ -147,6 +165,7 @@
   (dolist (overlay markdown-ts-appear-table--overlays)
     (delete-overlay overlay))
   (setq markdown-ts-appear-table--overlays nil
+        markdown-ts-appear-table--windows nil
         markdown-ts-appear-table--view nil))
 
 (defun markdown-ts-appear-table--rows (table)
@@ -222,6 +241,17 @@ Return a single nil entry when the buffer is not currently displayed."
                   (get-buffer-window-list (current-buffer) nil t))
       (list nil)))
 
+(defun markdown-ts-appear-table--window-state (&optional width)
+  "Return window, column width and font records, optionally overriding WIDTH."
+  (mapcar
+   (lambda (window)
+     (list window (or width (markdown-ts-appear-table--window-width window))
+           (mapcar (lambda (attribute)
+                     (face-attribute 'markdown-ts-table attribute
+                                     (and window (window-frame window)) 'default))
+                   '(:family :foundry :width :height :weight :slant :fontset))))
+   (if width (list nil) (markdown-ts-appear-table--display-windows))))
+
 (defun markdown-ts-appear-table--display-string (lines newline-p)
   "Join display LINES and preserve the source newline when NEWLINE-P."
   (let ((display (concat (mapconcat #'identity lines "\n")
@@ -277,17 +307,16 @@ Return a single nil entry when the buffer is not currently displayed."
                (overlay (make-overlay beg end nil nil nil)))
     (markdown-ts-appear-table--map-pipes row display)
     (overlay-put overlay 'display display)
-    (overlay-put overlay 'markdown-ts-appear-table--display display)
+    (overlay-put overlay 'markdown-ts-appear-table--layout
+                 (markdown-ts-appear-table--make-layout :display display))
     (overlay-put overlay 'markdown-ts-appear-table--wrapped t)
-    (overlay-put overlay 'markdown-ts-appear-table--row-beg beg)
-    (overlay-put overlay 'markdown-ts-appear-table--row-end end)
     (overlay-put overlay 'evaporate t)
     (when window
       (overlay-put overlay 'window window))
     (push overlay markdown-ts-appear-table--overlays)))
 
-(defun markdown-ts-appear-table--render-table (table windows width)
-  "Render TABLE in WINDOWS, optionally overriding window widths with WIDTH."
+(defun markdown-ts-appear-table--render-table (table windows)
+  "Render TABLE using the window and width records in WINDOWS."
   (let* ((rows (markdown-ts-appear-table--rows table))
          (markdown-table-wrap-pretty-prettify t)
          (cells (mapcar (lambda (row)
@@ -306,11 +335,10 @@ Return a single nil entry when the buffer is not currently displayed."
                   (markdown-ts-appear-table--row-cells (cadr rows))))
          (prefixes (mapcar #'markdown-ts-appear-table--prefix rows))
          (prefix-width (apply #'max 0 (mapcar #'string-width prefixes))))
-    (dolist (window windows)
+    (pcase-dolist (`(,window ,width ,_font) windows)
       (let ((widths (markdown-table-wrap-compute-widths
                      (car cells) (cddr cells)
-                     (max 1 (- (or width (markdown-ts-appear-table--window-width window))
-                               prefix-width))
+                     (max 1 (- width prefix-width))
                      (length aligns))))
         (cl-mapc
          (lambda (row contents prefix)
@@ -336,16 +364,16 @@ Return a single nil entry when the buffer is not currently displayed."
 
 (defun markdown-ts-appear-table--render (&optional width)
   "Rebuild wrapped tables, overriding each window width with WIDTH when set."
-  (markdown-ts-appear-table--delete-overlays)
-  (when (and (eq markdown-ts-appear-table-style 'wrapped)
-             (markdown-ts-appear--active-p))
-    (save-restriction
-      (widen)
-      (dolist (table (markdown-ts-appear-table--tables))
-        (unless (markdown-ts--outline-invisible-p (treesit-node-start table))
-          (markdown-ts-appear-table--render-table
-           table (if width (list nil) (markdown-ts-appear-table--display-windows))
-           width)))))
+  (let ((windows (markdown-ts-appear-table--window-state width)))
+    (markdown-ts-appear-table--delete-overlays)
+    (when (and (eq markdown-ts-appear-table-style 'wrapped)
+               (markdown-ts-appear--active-p))
+      (save-restriction
+        (widen)
+        (dolist (table (markdown-ts-appear-table--tables))
+          (unless (markdown-ts--outline-invisible-p (treesit-node-start table))
+            (markdown-ts-appear-table--render-table table windows))))
+      (setq markdown-ts-appear-table--windows windows)))
   (setq markdown-ts-appear-table--dirty nil)
   (markdown-ts-appear-table--update-visibility))
 
@@ -360,8 +388,8 @@ DISPLAY-P non-nil restores their rendered display."
           (overlay-put
            overlay 'display
            (and display-p
-                (overlay-get overlay
-                             'markdown-ts-appear-table--display))))))))
+                (markdown-ts-appear-table--layout-display
+                 (overlay-get overlay 'markdown-ts-appear-table--layout)))))))))
 
 (defun markdown-ts-appear-table--visible-region ()
   "Return numeric bounds of source currently revealed by the main mode."
@@ -370,68 +398,103 @@ DISPLAY-P non-nil restores their rendered display."
               (end (marker-position (cdr region))))
     (cons beg end)))
 
-(defun markdown-ts-appear-table--source-map (display beg end)
-  "Map source BEG..END to (GLYPH-BEG GLYPH-END LINE-BOUNDS) in DISPLAY.
+(defun markdown-ts-appear-table--build-layout (layout beg end)
+  "Build LAYOUT's source map and visual lines for BEG..END in one glyph pass.
 Hidden markup and discarded whitespace use the nearest surviving source
-character.  The mapping can run backwards when multiple cells wrap."
-  (let ((map (make-vector (- end beg) nil))
+character.  Navigation stops are offsets from the source-row overlay."
+  (let ((display (markdown-ts-appear-table--layout-display layout))
+        (map (make-vector (- end beg) nil))
         (offset 0)
-        (line (cons 0 (or (string-search "\n" display) (length display))))
+        (line-beg 0) (line-index 0) (column 0)
         (runs (make-hash-table :test #'eq))
-        previous)
+        stops lines previous)
     (dolist (glyph (string-glyph-split display))
-      (when (> offset (cdr line))
-        (setq line (cons offset (or (string-search "\n" display offset)
-                                   (length display)))))
-      (let ((bounds (list offset (+ offset (length glyph)) line)))
+      (let ((position (markdown-ts-appear-table--make-position
+                       :beg offset :end (+ offset (length glyph))
+                       :line line-index :column column)))
         (dotimes (index (length glyph))
           (when-let* ((source (get-text-property
                               index 'markdown-ts-appear-table--source glyph)))
             (when (consp source)
-              (let ((position (gethash source runs 0))
+              (let ((source-index (gethash source runs 0))
                     (text (cdr source)))
-                (while (and (< position (length text))
-                            (/= (aref text position) (aref glyph index)))
-                  (setq position (1+ position)))
-                (puthash source (1+ position) runs)
-                (setq source (+ (car source) position))
+                (while (and (< source-index (length text))
+                            (/= (aref text source-index) (aref glyph index)))
+                  (setq source-index (1+ source-index)))
+                (puthash source (1+ source-index) runs)
+                (setq source (+ (car source) source-index))
                 (put-text-property (+ offset index) (+ offset index 1)
                                    'markdown-ts-appear-table--source source display)))
             (when (and (<= beg source) (< source end))
-              (aset map (- source beg) bounds))))
-        (setq offset (cadr bounds))))
+              (aset map (- source beg) position)
+              (when (and (= index 0) (not (equal glyph "\n")))
+                (push (cons column (- source beg)) stops)))))
+        (if (equal glyph "\n")
+            (progn
+              (push (markdown-ts-appear-table--make-line
+                     :beg line-beg :end offset :width column
+                     :stops (nreverse stops)) lines)
+              (setq line-beg (1+ offset) line-index (1+ line-index)
+                    column 0 stops nil))
+          (setq column (+ column (string-width glyph))))
+        (setq offset (markdown-ts-appear-table--position-end position))))
+    (when (or (> offset line-beg) (null lines))
+      (push (markdown-ts-appear-table--make-line
+             :beg line-beg :end offset :width column :stops (nreverse stops)) lines))
     ;; Fill gaps in source order, never in visual order across columns.
     (dotimes (index (length map))
       (when (aref map index)
-        (let ((left (or previous -1)))
+        (let* ((left (or previous -1))
+               (position (and previous (aref map left)))
+               (boundary (and position (markdown-ts-appear-table--position-end position)))
+               (padding
+                (when (and (> index (1+ left)) boundary (< boundary (length display))
+                           (eq (aref display boundary) ?\s))
+                  (markdown-ts-appear-table--make-position
+                   :beg boundary :end (1+ boundary)
+                   :line (markdown-ts-appear-table--position-line position)
+                   :column (+ (markdown-ts-appear-table--position-column position)
+                              (string-width
+                               (substring display
+                                          (markdown-ts-appear-table--position-beg position)
+                                          boundary)))))))
           (cl-loop for gap from (1+ left) below index
-                   for boundary = (and previous (cadr (aref map left)))
                    do (aset
                        map gap
                        (cond
-                        ((and boundary (< boundary (length display))
-                              (memq (char-after (+ beg gap)) '(?\s ?\t))
-                              (eq (aref display boundary) ?\s))
-                         (list boundary (1+ boundary) (nth 2 (aref map left))))
+                        ((and padding (memq (char-after (+ beg gap)) '(?\s ?\t)))
+                         padding)
                         ((and previous (< (- gap left) (- index gap)))
                          (aref map left))
                         (t (aref map index))))))
         (setq previous index)))
-    (cl-loop for index from (if previous (1+ previous) 0) below (length map)
-             do (aset map index (if previous (aref map previous)
-                                 (list 0 1 (cons 0 (length display))))))
-    map))
+    (let ((last (if previous (aref map previous)
+                  (markdown-ts-appear-table--make-position
+                   :beg 0 :end 1 :line 0 :column 0))))
+      (cl-loop for index from (if previous (1+ previous) 0) below (length map)
+               do (aset map index last)))
+    (setf (markdown-ts-appear-table--layout-map layout) map
+          (markdown-ts-appear-table--layout-lines layout) (vconcat (nreverse lines)))
+    layout))
+
+(defun markdown-ts-appear-table--layout (row)
+  "Return ROW's layout, lazily preparing its motion geometry."
+  (let ((layout (overlay-get row 'markdown-ts-appear-table--layout)))
+    (unless (markdown-ts-appear-table--layout-map layout)
+      (markdown-ts-appear-table--build-layout layout (overlay-start row) (overlay-end row)))
+    layout))
 
 (defun markdown-ts-appear-table--cursor-row-current-p (window)
   "Return non-nil when the interactive row still contains point in WINDOW."
-  (pcase markdown-ts-appear-table--cursor-row
-    (`(,beg ,end ,row-window ,base-overlay)
-     (and (eq window row-window)
-          (overlay-buffer base-overlay)
-          (<= beg (point))
-          (or (< (point) end)
-              (and (= end (point-max)) (= (point) end)
-                   (not (eq (char-before) ?\n))))))))
+  (when-let* ((row markdown-ts-appear-table--cursor-row)
+              ((overlay-buffer row))
+              (beg (overlay-start row))
+              (end (overlay-end row)))
+    (and (eq window (overlay-get (cadr markdown-ts-appear-table--cursor-overlays) 'window))
+         (<= beg (point))
+         (or (< (point) end)
+             (and (= end (point-max)) (= (point) end)
+                  (not (eq (char-before) ?\n)))))))
 
 (defun markdown-ts-appear-table--row-overlay-at-point (window)
   "Return the effective wrapped-row overlay at point in WINDOW."
@@ -451,12 +514,8 @@ character.  The mapping can run backwards when multiple cells wrap."
 
 (defun markdown-ts-appear-table--make-cursor-overlays (row-overlay window)
   "Make ROW-OVERLAY interactive in WINDOW without revealing its source."
-  (let* ((beg (overlay-get row-overlay 'markdown-ts-appear-table--row-beg))
-         (end (overlay-get row-overlay 'markdown-ts-appear-table--row-end))
-         (display (overlay-get row-overlay 'markdown-ts-appear-table--display)))
-    (unless (overlay-get row-overlay 'markdown-ts-appear-table--map)
-      (overlay-put row-overlay 'markdown-ts-appear-table--map
-                   (markdown-ts-appear-table--source-map display beg end)))
+  (let ((beg (overlay-start row-overlay)))
+    (markdown-ts-appear-table--layout row-overlay)
     (dotimes (_ 3)
       (let ((overlay (make-overlay beg beg)))
         (overlay-put overlay 'display "")
@@ -464,46 +523,20 @@ character.  The mapping can run backwards when multiple cells wrap."
         (overlay-put overlay 'priority '(nil . 1))
         (overlay-put overlay 'window window)
         (push overlay markdown-ts-appear-table--cursor-overlays)))
-    (setq markdown-ts-appear-table--cursor-row
-          (list beg end window row-overlay))))
-
-(defun markdown-ts-appear-table--navigation (row)
-  "Return cached visual lines and a line-offset index for ROW.
-Each visual line contains (COLUMN . SOURCE) cursor stops in display order."
-  (or (overlay-get row 'markdown-ts-appear-table--navigation)
-      (let* ((display (overlay-get row 'markdown-ts-appear-table--display))
-             (index (make-hash-table :test #'eql))
-             (offset 0) (column 0) (number 0) stops lines)
-        (unless (overlay-get row 'markdown-ts-appear-table--map)
-          (overlay-put row 'markdown-ts-appear-table--map
-                       (markdown-ts-appear-table--source-map
-                        display (overlay-start row) (overlay-end row))))
-        (puthash 0 0 index)
-        (dolist (glyph (string-glyph-split display))
-          (if (equal glyph "\n")
-              (progn
-                (push (nreverse stops) lines)
-                (setq stops nil column 0 number (1+ number))
-                (puthash (1+ offset) number index))
-            (when-let* ((source (get-text-property
-                                0 'markdown-ts-appear-table--source glyph)))
-              (push (cons column source) stops))
-            (setq column (+ column (string-width glyph))))
-          (setq offset (+ offset (length glyph))))
-        (when (or stops (not (string-suffix-p "\n" display)))
-          (push (nreverse stops) lines))
-        (overlay-put row 'markdown-ts-appear-table--navigation
-                     (cons (vconcat (nreverse lines)) index)))))
+    (setq markdown-ts-appear-table--cursor-row row-overlay)))
 
 (defun markdown-ts-appear-table--goto-column (row line column)
-  "Move to ROW's source stop on visual LINE nearest COLUMN."
-  (let ((stops (aref (car (markdown-ts-appear-table--navigation row)) line))
-        best distance)
+  "Move to ROW's source stop on visual LINE nearest COLUMN.
+A negative LINE counts backwards from the last visual line."
+  (let* ((lines (markdown-ts-appear-table--layout-lines (markdown-ts-appear-table--layout row)))
+         (stops (markdown-ts-appear-table--line-stops
+                 (aref lines (if (< line 0) (+ (length lines) line) line))))
+         best distance)
     (dolist (stop stops)
       (let ((delta (abs (- column (car stop)))))
-        (when (and (<= (point-min) (cdr stop) (point-max))
+        (when (and (<= (point-min) (+ (overlay-start row) (cdr stop)) (point-max))
                    (or (null distance) (< delta distance)))
-          (setq best (cdr stop) distance delta))))
+          (setq best (+ (overlay-start row) (cdr stop)) distance delta))))
     (goto-char (or best (overlay-start row)))))
 
 (defun markdown-ts-appear-table--source-column (&optional target)
@@ -524,19 +557,18 @@ Each visual line contains (COLUMN . SOURCE) cursor stops in display order."
 (defun markdown-ts-appear-table--motion-row (window)
   "Return the wrapped row at point in WINDOW, including the active anchor."
   (if (markdown-ts-appear-table--cursor-row-current-p window)
-      (nth 3 markdown-ts-appear-table--cursor-row)
+      markdown-ts-appear-table--cursor-row
     (markdown-ts-appear-table--row-overlay-at-point window)))
 
 (defun markdown-ts-appear-table--visual-column (row)
   "Return point's rendered column in ROW without counting hidden source."
-  (markdown-ts-appear-table--navigation row)
-  (let ((display (overlay-get row 'markdown-ts-appear-table--display)))
+  (let* ((layout (markdown-ts-appear-table--layout row))
+         (lines (markdown-ts-appear-table--layout-lines layout)))
     (if (= (point) (overlay-end row))
-        (string-width (substring display
-                                 (1+ (or (cl-position ?\n display :from-end t) -1))))
-      (let ((bounds (aref (overlay-get row 'markdown-ts-appear-table--map)
-                          (- (point) (overlay-start row)))))
-        (string-width (substring display (car (nth 2 bounds)) (car bounds)))))))
+        (markdown-ts-appear-table--line-width (aref lines (1- (length lines))))
+      (markdown-ts-appear-table--position-column
+       (aref (markdown-ts-appear-table--layout-map layout)
+             (- (point) (overlay-start row)))))))
 
 (defun markdown-ts-appear-table--visual-step (function step column noerror rest)
   "Move one visual STEP toward COLUMN, using FUNCTION outside wrapped rows.
@@ -548,16 +580,15 @@ NOERROR and REST are passed to the native line motion when needed."
           (apply function step noerror rest)
           (when-let* ((target (markdown-ts-appear-table--row-overlay-at-point window)))
             (markdown-ts-appear-table--goto-column
-             target (if (> step 0) 0
-                      (1- (length (car (markdown-ts-appear-table--navigation target)))))
-             column)))
-      (let* ((navigation (markdown-ts-appear-table--navigation row))
-             (map (overlay-get row 'markdown-ts-appear-table--map))
+             target (if (> step 0) 0 -1) column)))
+      (let* ((layout (markdown-ts-appear-table--layout row))
+             (lines (markdown-ts-appear-table--layout-lines layout))
+             (map (markdown-ts-appear-table--layout-map layout))
              (bounds (aref map (min (1- (length map)) (- (point) (overlay-start row)))))
              (line (+ step (if (= (point) (overlay-end row))
-                               (1- (length (car navigation)))
-                             (gethash (car (nth 2 bounds)) (cdr navigation))))))
-        (if (and (>= line 0) (< line (length (car navigation))))
+                               (1- (length lines))
+                             (markdown-ts-appear-table--position-line bounds)))))
+        (if (and (>= line 0) (< line (length lines)))
             (markdown-ts-appear-table--goto-column row line column)
           (let ((next (if (> step 0) (overlay-end row) (1- (overlay-start row)))))
             (if (or (< next (point-min)) (> next (point-max))
@@ -568,9 +599,7 @@ NOERROR and REST are passed to the native line motion when needed."
               (goto-char next)
               (if-let* ((target (markdown-ts-appear-table--row-overlay-at-point window)))
                   (markdown-ts-appear-table--goto-column
-                   target (if (> step 0) 0
-                            (1- (length (car (markdown-ts-appear-table--navigation target)))))
-                   column)
+                   target (if (> step 0) 0 -1) column)
                 (vertical-motion (cons column 0))))))))))
 
 (defun markdown-ts-appear-table--line-move
@@ -594,10 +623,7 @@ NOERROR and REST retain the native command's boundary behavior and options."
                         ((numberp column)))
               (if line-move-visual
                   (markdown-ts-appear-table--goto-column
-                   target (if (< count 0)
-                              (1- (length (car (markdown-ts-appear-table--navigation target))))
-                            0)
-                   column)
+                   target (if (< count 0) -1 0) column)
                 (markdown-ts-appear-table--source-column column))
               (setq disable-point-adjustment t)))
         (let* ((saved (if (consp temporary-goal-column)
@@ -636,13 +662,16 @@ NOERROR and REST retain the native command's boundary behavior and options."
 
 (defun markdown-ts-appear-table--place-cursor ()
   "Anchor the row's display at the real source character under point."
-  (pcase-let* ((`(,beg ,end ,_window ,row) markdown-ts-appear-table--cursor-row)
+  (pcase-let* ((row markdown-ts-appear-table--cursor-row)
+               (beg (overlay-start row)) (end (overlay-end row))
                (`(,before ,anchor ,after) markdown-ts-appear-table--cursor-overlays)
                (position (min (point) (1- end)))
-               (bounds (aref (overlay-get row 'markdown-ts-appear-table--map)
+               (layout (overlay-get row 'markdown-ts-appear-table--layout))
+               (bounds (aref (markdown-ts-appear-table--layout-map layout)
                              (- position beg)))
-               (line (nth 2 bounds))
-               (display (overlay-get row 'markdown-ts-appear-table--display)))
+               (line (aref (markdown-ts-appear-table--layout-lines layout)
+                            (markdown-ts-appear-table--position-line bounds)))
+               (display (markdown-ts-appear-table--layout-display layout)))
     (unless (and (= (overlay-start anchor) position)
                  (= (overlay-end anchor) (1+ position)))
       (move-overlay before beg position)
@@ -651,13 +680,18 @@ NOERROR and REST retain the native command's boundary behavior and options."
     ;; Keep the strings on fixed row endpoints: attaching them to the moving
     ;; anchor leaks the following source face into extended backgrounds.
     ;; Reuse them throughout a visual line; only its cursor property changes.
-    (unless (equal line (overlay-get anchor 'markdown-ts-appear-table--line))
-      (overlay-put before 'before-string (substring display 0 (car line)))
-      (overlay-put anchor 'display (substring display (car line) (cdr line)))
-      (overlay-put after 'after-string (substring display (cdr line)))
+    (unless (eq line (overlay-get anchor 'markdown-ts-appear-table--line))
+      (overlay-put before 'before-string
+                   (substring display 0 (markdown-ts-appear-table--line-beg line)))
+      (overlay-put anchor 'display
+                   (substring display (markdown-ts-appear-table--line-beg line)
+                              (markdown-ts-appear-table--line-end line)))
+      (overlay-put after 'after-string
+                   (substring display (markdown-ts-appear-table--line-end line)))
       (overlay-put anchor 'markdown-ts-appear-table--line line)
       (overlay-put anchor 'markdown-ts-appear-table--offset nil))
-    (let ((offset (- (car bounds) (car line)))
+    (let ((offset (- (markdown-ts-appear-table--position-beg bounds)
+                     (markdown-ts-appear-table--line-beg line)))
           (old (overlay-get anchor 'markdown-ts-appear-table--offset))
           (text (overlay-get anchor 'display)))
       (unless (eq offset old)
@@ -711,6 +745,22 @@ NOERROR and REST retain the native command's boundary behavior and options."
   (setq markdown-ts-appear-table--dirty t)
   (markdown-ts-appear-table--delete-overlays))
 
+(defun markdown-ts-appear-table--refresh-windows ()
+  "Rebuild tables only when the window geometry or fonts have changed."
+  (let ((windows (markdown-ts-appear-table--window-state)))
+    ;; Selection changes may reorder the windows without changing any layout.
+    (unless (and (= (length windows) (length markdown-ts-appear-table--windows))
+                 (cl-every (lambda (state)
+                             (equal (cdr state)
+                                    (cdr (assq (car state) markdown-ts-appear-table--windows))))
+                           windows))
+      (markdown-ts-appear-table--render))))
+
+(defun markdown-ts-appear-table--outline-change ()
+  "Invalidate visibility-dependent layouts even when window widths agree."
+  (setq markdown-ts-appear-table--windows nil)
+  (markdown-ts-appear-table--schedule-render))
+
 (defun markdown-ts-appear-table--schedule-render (&rest _)
   "Schedule a debounced rebuild of wrapped tables."
   (when markdown-ts-appear-table--resize-timer
@@ -725,7 +775,7 @@ NOERROR and REST retain the native command's boundary behavior and options."
                  (setq markdown-ts-appear-table--resize-timer nil)
                  (when (and (eq markdown-ts-appear-table-style 'wrapped)
                             (markdown-ts-appear--active-p))
-                   (markdown-ts-appear-table--render)))))))))
+                   (markdown-ts-appear-table--refresh-windows)))))))))
 
 (defun markdown-ts-appear-table--setup ()
   "Install wrapped-table rendering when requested by the main mode."
@@ -740,7 +790,7 @@ NOERROR and REST retain the native command's boundary behavior and options."
               #'markdown-ts-appear-table--selection-change nil t)
     (with-suppressed-warnings ((obsolete outline-view-change-hook))
       (add-hook 'outline-view-change-hook
-                #'markdown-ts-appear-table--schedule-render nil t))
+                #'markdown-ts-appear-table--outline-change nil t))
     (markdown-ts-appear-table--render)))
 
 (defun markdown-ts-appear-table--teardown ()
@@ -753,7 +803,7 @@ NOERROR and REST retain the native command's boundary behavior and options."
                #'markdown-ts-appear-table--selection-change t)
   (with-suppressed-warnings ((obsolete outline-view-change-hook))
     (remove-hook 'outline-view-change-hook
-                 #'markdown-ts-appear-table--schedule-render t))
+                 #'markdown-ts-appear-table--outline-change t))
   (when markdown-ts-appear-table--resize-timer
     (cancel-timer markdown-ts-appear-table--resize-timer)
     (setq markdown-ts-appear-table--resize-timer nil))
@@ -773,8 +823,9 @@ base buffer."
                #'markdown-ts-appear-table--selection-change t)
   (with-suppressed-warnings ((obsolete outline-view-change-hook))
     (remove-hook 'outline-view-change-hook
-                 #'markdown-ts-appear-table--schedule-render t))
+                 #'markdown-ts-appear-table--outline-change t))
   (setq markdown-ts-appear-table--overlays nil
+        markdown-ts-appear-table--windows nil
         markdown-ts-appear-table--cursor-overlays nil
         markdown-ts-appear-table--cursor-row nil
         markdown-ts-appear-table--resize-timer nil

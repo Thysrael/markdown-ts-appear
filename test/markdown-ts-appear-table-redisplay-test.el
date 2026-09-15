@@ -77,7 +77,8 @@ Have the PTY driver capture the actual native-text cursor instead."
                            (overlay-get overlay 'markdown-ts-appear-table--wrapped))
                          (overlays-at (point))))
                    (beg (overlay-start row))
-                   (display (overlay-get row 'markdown-ts-appear-table--display)))
+                   (display (markdown-ts-appear-table--layout-display
+                             (markdown-ts-appear-table--layout row))))
               (dotimes (index (length display))
                 (when-let* ((source (get-text-property
                                     index 'markdown-ts-appear-table--source display)))
@@ -167,8 +168,9 @@ Have the PTY driver capture the actual native-text cursor instead."
               (search-forward token)
               (goto-char (match-beginning 0))
               (markdown-ts-appear-table--post-command)
-              (let* ((row (nth 3 markdown-ts-appear-table--cursor-row))
-                     (display (overlay-get row 'markdown-ts-appear-table--display))
+              (let* ((row markdown-ts-appear-table--cursor-row)
+                     (display (markdown-ts-appear-table--layout-display
+                               (markdown-ts-appear-table--layout row)))
                      (index (string-match (regexp-quote token) display))
                      (expected (markdown-ts-appear-table-redisplay--reference-position
                                 display index)))
@@ -179,8 +181,9 @@ Have the PTY driver capture the actual native-text cursor instead."
             (goto-char (point-max))
             (markdown-ts-appear-table--post-command)
             (redisplay t)
-            (let* ((row (nth 3 markdown-ts-appear-table--cursor-row))
-                   (display (overlay-get row 'markdown-ts-appear-table--display))
+            (let* ((row markdown-ts-appear-table--cursor-row)
+                   (display (markdown-ts-appear-table--layout-display
+                             (markdown-ts-appear-table--layout row)))
                    (expected (markdown-ts-appear-table-redisplay--reference-position
                               display (length display))))
               (markdown-ts-appear-table--post-command)
@@ -220,8 +223,9 @@ Have the PTY driver capture the actual native-text cursor instead."
             (redisplay t)
             (let* ((beg (point))
                    (length (- (line-end-position) beg 1))
-                   (row (nth 3 markdown-ts-appear-table--cursor-row))
-                   (display (overlay-get row 'markdown-ts-appear-table--display))
+                   (row markdown-ts-appear-table--cursor-row)
+                   (display (markdown-ts-appear-table--layout-display
+                             (markdown-ts-appear-table--layout row)))
                    (top (nth 1 (window-inside-edges)))
                    (height (cl-count ?\n display)))
               (send-string-to-terminal (format "\e]777;watch;%d;%d\a" top (+ top height)))

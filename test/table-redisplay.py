@@ -14,6 +14,8 @@ import termios
 import time
 import unicodedata
 
+CSI = re.compile(r"\x1b\[([0-9;? >]*)([@-~])")
+
 
 class Cursor:
     """Track VT cursor movement and validate private OSC checkpoints."""
@@ -29,11 +31,12 @@ class Cursor:
         self.paints = 0
 
     def feed(self, text):
-        self.pending += text
-        while self.pending:
-            char = self.pending[0]
+        data = self.pending + text
+        position = 0
+        while position < len(data):
+            char = data[position]
             if char == "\x1b":
-                match = re.match(r"\x1b\[([0-9;? >]*)([@-~])", self.pending)
+                match = CSI.match(data, position)
                 if match:
                     raw, command = match.groups()
                     params = [int(p or 0) for p in raw.split(";")] if not any(
@@ -60,13 +63,13 @@ class Cursor:
                     elif command in "JK" and self.watch:
                         if command == "J" or self.watch[0] <= self.row < self.watch[1]:
                             self.paints += 1
-                    self.pending = self.pending[match.end():]
+                    position = match.end()
                     continue
-                if self.pending.startswith("\x1b]"):
-                    end = self.pending.find("\a")
+                if data.startswith("\x1b]", position):
+                    end = data.find("\a", position + 2)
                     if end < 0:
-                        return
-                    payload = self.pending[2:end]
+                        break
+                    payload = data[position + 2:end]
                     if payload.startswith("777;reference;"):
                         self.references[int(payload.split(";")[2])] = (self.row, self.col)
                     elif payload.startswith(("777;cursor;", "777;compare;")):
@@ -88,18 +91,18 @@ class Cursor:
                         self.watch = None
                     elif payload.startswith("777;done;"):
                         self.expected_checks = int(payload.split(";")[2])
-                    self.pending = self.pending[end + 1:]
+                    position = end + 1
                     continue
-                if len(self.pending) < 2 or self.pending.startswith("\x1b["):
-                    return
-                if self.pending[1] in "()":
-                    if len(self.pending) < 3:
-                        return
-                    self.pending = self.pending[3:]
+                if len(data) - position < 2 or data.startswith("\x1b[", position):
+                    break
+                if data[position + 1] in "()":
+                    if len(data) - position < 3:
+                        break
+                    position += 3
                 else:
-                    self.pending = self.pending[2:]
+                    position += 2
                 continue
-            self.pending = self.pending[1:]
+            position += 1
             if char == "\r":
                 self.col = 0
             elif char == "\n":
@@ -112,6 +115,8 @@ class Cursor:
                 if self.watch and self.watch[0] <= self.row < self.watch[1]:
                     self.paints += 1
                 self.col += 2 if unicodedata.east_asian_width(char) in "WF" else 1
+        # Only an incomplete escape sequence survives to the next input batch.
+        self.pending = data[position:]
 
 
 def main():

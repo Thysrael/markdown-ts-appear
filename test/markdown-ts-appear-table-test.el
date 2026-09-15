@@ -56,17 +56,16 @@
 
 (defun markdown-ts-appear-table-test--display (overlay)
   "Return OVERLAY's saved wrapped display regardless of reveal state."
-  (overlay-get overlay 'markdown-ts-appear-table--display))
+  (markdown-ts-appear-table--layout-display
+   (overlay-get overlay 'markdown-ts-appear-table--layout)))
 
 (defun markdown-ts-appear-table-test--row-overlays-at (position &optional window)
   "Return overlays for the source row at POSITION, optionally in WINDOW."
   (sort
    (seq-filter
     (lambda (overlay)
-      (and (<= (overlay-get overlay 'markdown-ts-appear-table--row-beg)
-               position)
-           (< position
-              (overlay-get overlay 'markdown-ts-appear-table--row-end))
+      (and (<= (overlay-start overlay) position)
+           (< position (overlay-end overlay))
            (or (null window) (eq window (overlay-get overlay 'window)))))
     (markdown-ts-appear-table-test--overlays))
    (lambda (a b) (< (overlay-start a) (overlay-start b)))))
@@ -82,8 +81,7 @@
   (length
    (delete-dups
     (mapcar
-     (lambda (overlay)
-       (overlay-get overlay 'markdown-ts-appear-table--row-beg))
+     #'overlay-start
      (or overlays (markdown-ts-appear-table-test--overlays))))))
 
 (defun markdown-ts-appear-table-test--cursor-overlays ()
@@ -96,6 +94,113 @@
   (let* ((display (overlay-get overlay 'display))
          (offset (text-property-any 0 (length display) 'cursor t display)))
     (substring display offset (1+ offset))))
+
+(ert-deftest markdown-ts-appear-table-test-motion-shares-one-glyph-pass ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | abcd efgh ijkl mnop qrst uvwx |\n"
+      18
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (markdown-ts-appear-stop)
+      (goto-char (point-min))
+      (forward-line 2)
+      (let* ((row (car (markdown-ts-appear-table-test--row-overlays-at (point))))
+             (layout (overlay-get row 'markdown-ts-appear-table--layout))
+             (display (markdown-ts-appear-table--layout-display layout))
+             (split (symbol-function 'string-glyph-split))
+             (calls 0))
+        (should-not (markdown-ts-appear-table--layout-map layout))
+        (cl-letf (((symbol-function 'string-glyph-split)
+                   (lambda (string)
+                     (when (eq string display) (cl-incf calls))
+                     (funcall split string))))
+          (run-hooks 'post-command-hook)
+          (let ((line-move-visual t) (last-command nil)
+                goal-column temporary-goal-column)
+            (line-move 1)
+            (run-hooks 'post-command-hook)
+            (line-move -1)
+            (run-hooks 'post-command-hook)))
+        (should (= calls 1))
+        (should (eq layout (markdown-ts-appear-table--layout row)))
+        (should (= 3 (length (markdown-ts-appear-table--layout-lines layout))))))))
+
+(ert-deftest markdown-ts-appear-table-test-window-refresh-skips-unchanged-layout ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | a long value that can wrap in each window |\n"
+      25
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let* ((first (selected-window))
+             (second (split-window-right))
+             (windows (list first second))
+             (width 40)
+             (render (symbol-function 'markdown-ts-appear-table--render))
+             (calls 0))
+        (set-window-buffer second (current-buffer))
+        (cl-letf (((symbol-function 'markdown-ts-appear-table--display-windows)
+                   (lambda () windows))
+                  ((symbol-function 'markdown-ts-appear-table--window-width)
+                   (lambda (window) (if (eq first window) 50 width))))
+          (markdown-ts-appear-table--render)
+          (let ((overlays (copy-sequence markdown-ts-appear-table--overlays)))
+            (cl-letf (((symbol-function 'markdown-ts-appear-table--render)
+                       (lambda (&rest args) (cl-incf calls) (apply render args))))
+              (setq windows (reverse windows))
+              (markdown-ts-appear-table--refresh-windows)
+              (should (= calls 0))
+              (should (equal overlays markdown-ts-appear-table--overlays))
+              (setq width 24)
+              (markdown-ts-appear-table--refresh-windows)
+              (should (= calls 1))
+              (should-not (seq-some #'overlay-buffer overlays))
+              (markdown-ts-appear-table--refresh-windows)
+              (should (= calls 1))
+              (delete-window second)
+              (setq windows (list first))
+              (markdown-ts-appear-table--refresh-windows)
+              (should (= calls 2))
+              (should (cl-every (lambda (overlay) (eq first (overlay-get overlay 'window)))
+                                markdown-ts-appear-table--overlays)))))))))
+
+(ert-deftest markdown-ts-appear-table-test-font-changes-invalidate-layout ()
+  (markdown-ts-appear-table-test--with-buffer "| A | B |\n|---|---|\n| x | y |\n" 20
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let ((height (face-attribute 'markdown-ts-table :height)))
+        (unwind-protect
+            (cl-letf (((symbol-function 'markdown-ts-appear-table--window-width)
+                       (lambda (_) 40)))
+              (markdown-ts-appear-table--render)
+              (let ((overlays (copy-sequence markdown-ts-appear-table--overlays)))
+                (set-face-attribute 'markdown-ts-table nil :height
+                                    (+ 10 (face-attribute 'markdown-ts-table :height nil 'default)))
+                (markdown-ts-appear-table--refresh-windows)
+                (should-not (seq-some #'overlay-buffer overlays))))
+          (set-face-attribute 'markdown-ts-table nil :height height))))))
+
+(ert-deftest markdown-ts-appear-table-test-outline-and-edits-force-refresh ()
+  (markdown-ts-appear-table-test--with-buffer
+      "# Heading\n\n| A | B |\n|---|---|\n| x | y |\n"
+      20
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (markdown-ts-appear-stop)
+      (markdown-ts-appear-table--render)
+      (goto-char (point-min))
+      (outline-hide-subtree)
+      (should-not markdown-ts-appear-table--windows)
+      (markdown-ts-appear-table--refresh-windows)
+      (should-not markdown-ts-appear-table--overlays)
+      (outline-show-all)
+      (should-not markdown-ts-appear-table--windows)
+      (markdown-ts-appear-table--refresh-windows)
+      (should (= 3 (length markdown-ts-appear-table--overlays)))
+      (search-forward "| x |")
+      (insert " changed")
+      (should-not markdown-ts-appear-table--windows)
+      (markdown-ts-appear-table--refresh-windows)
+      (should (string-match-p "changed" (markdown-ts-appear-table-test--row-display-at (point)))))))
 
 (ert-deftest markdown-ts-appear-table-test-wraps-cjk-cell-without-editing-source ()
   (let ((source
@@ -220,10 +325,8 @@
     (search-forward "long")
     (let* ((row-overlays
             (markdown-ts-appear-table-test--row-overlays-at (point)))
-           (beg (overlay-get (car row-overlays)
-                             'markdown-ts-appear-table--row-beg))
-           (end (overlay-get (car row-overlays)
-                             'markdown-ts-appear-table--row-end))
+           (beg (overlay-start (car row-overlays)))
+           (end (overlay-end (car row-overlays)))
            (renders 0))
       (save-window-excursion
         (switch-to-buffer (current-buffer))
@@ -232,7 +335,7 @@
           (run-hooks 'post-command-hook)
           (let ((cursor-overlays
                  (markdown-ts-appear-table-test--cursor-overlays)))
-            (cl-letf (((symbol-function 'markdown-ts-appear-table--source-map)
+            (cl-letf (((symbol-function 'markdown-ts-appear-table--build-layout)
                        (lambda (&rest _) (ert-fail "Motion rebuilt the source map")))
                       ((symbol-function 'markdown-ts-appear-table--tables)
                        (lambda (&rest _) (ert-fail "Motion scanned the document"))))

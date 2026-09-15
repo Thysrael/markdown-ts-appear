@@ -153,7 +153,9 @@ jobs:
             -f ert-run-tests-batch-and-exit
 
       - name: Check real terminal cursor and Evil insert transitions
-        run: python3 test/table-redisplay.py
+        run: |
+          python3 -B -m unittest discover -s test -p 'test_*.py'
+          python3 test/table-redisplay.py
 
   package-lint:
     runs-on: ubuntu-latest
