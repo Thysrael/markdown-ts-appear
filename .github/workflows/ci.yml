@@ -164,11 +164,13 @@ jobs:
         if: matrix.mathjax
         timeout-minutes: 3
         run: |
-          emacs -Q \
-            --eval '(progn (require (quote package)) (package-initialize))' \
-            -L "$PWD" -l "$PWD/test/markdown-ts-appear-image-test.el" \
-            -f markdown-ts-appear-image-test-run-gui \
-            -ApplePersistenceIgnoreState YES
+          for attempt in {1..5}; do
+            emacs -Q \
+              --eval '(progn (require (quote package)) (package-initialize))' \
+              -L "$PWD" -l "$PWD/test/markdown-ts-appear-image-test.el" \
+              -f markdown-ts-appear-image-test-run-gui \
+              -ApplePersistenceIgnoreState YES
+          done
 
       - name: Preserve native crash reports
         if: ${{ failure() && matrix.mathjax }}
