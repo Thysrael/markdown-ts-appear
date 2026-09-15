@@ -151,7 +151,9 @@
   "Fit the whole BASE image to VIEW's available width and height."
   (let* ((window (markdown-ts-appear-image--view-window view))
          (width (max 1 (min (window-body-width window t)
-                           (or markdown-ts-image-max-width (window-body-width window t)))))
+                           (if (numberp markdown-ts-image-max-width)
+                               markdown-ts-image-max-width
+                             (window-body-width window t)))))
          (line-height (max 1 (window-font-height window)))
          (margin (min scroll-margin (floor (* maximum-scroll-margin (window-body-height window)))))
          (height (max line-height (- (window-body-height window t) (* (+ 2 (* 2 margin)) line-height))))

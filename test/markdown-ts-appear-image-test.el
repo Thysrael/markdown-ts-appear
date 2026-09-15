@@ -29,7 +29,7 @@
          (setq default-directory markdown-ts-appear-image-test--directory)
          (insert ,source)
          (markdown-ts-mode)
-         (setq-local markdown-ts-inline-images t markdown-ts-image-max-width 120 line-spacing 0)
+          (setq-local markdown-ts-inline-images t line-spacing 0)
           (let ((display-p (symbol-function 'display-images-p))
                 (font-height (symbol-function 'window-font-height))
                 (body-height (symbol-function 'window-body-height))
@@ -324,6 +324,11 @@
                          (setq image (markdown-ts-appear-image--view-image view))
                          (let ((next (seq-count #'identity
                                                 (markdown-ts-appear-image-test--pixel-map image height))))
+                           (when (> (abs (- next previous)) line-height)
+                             (princ (format "Image frame: fixture=%S previous=%S next=%S size=%S window=%S start=%S point=%S vscroll=%S\n"
+                                            fixture previous next (image-size image t)
+                                            (window-body-height nil t) (window-start) (point) (window-vscroll nil t))
+                                    'external-debugging-output))
                            (should (<= (abs (- next previous)) line-height))
                            (when (< 0 next full) (setq partial t))
                            (setq previous next visible next))))))
@@ -359,7 +364,7 @@
 
 (ert-deftest markdown-ts-appear-image-test-windows-use-independent-size-limits ()
   (markdown-ts-appear-image-test--buffer "![tall](image-tall.svg)\n\nafter\n"
-    (setq-local markdown-ts-image-max-width nil)
+    (setq-local markdown-ts-image-max-width 'window)
     (let* ((owner (car markdown-ts-appear-image--objects))
            (first (markdown-ts-appear-image-test--view))
            (other (split-window-right (/ (window-total-width) 3))))
