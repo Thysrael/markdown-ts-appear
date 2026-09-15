@@ -203,8 +203,8 @@
              (old-index (markdown-ts-appear-image--view-index view))
              (cursor-p (and old-index (eq view markdown-ts-appear-image--cursor)
                             (eq window (selected-window))
-                            (eq view (get-char-property (point) 'markdown-ts-appear-image--view))
-                            (eql old-index (get-char-property (point) 'markdown-ts-appear-image--slice))))
+                            (eq view (get-char-property (point) 'markdown-ts-appear-image--view window))
+                            (eql old-index (get-char-property (point) 'markdown-ts-appear-image--slice window))))
              slices)
         (cl-loop with rows = (max 1 (/ h height))
                  for index below rows
@@ -323,8 +323,9 @@
              (not (markdown-ts-appear-image--visible-p
                    (markdown-ts-appear-image--view-owner markdown-ts-appear-image--cursor))))
     ;; Tile anchors are display positions, not proportional editing positions.
-    (when (eq markdown-ts-appear-image--cursor
-              (get-char-property (point) 'markdown-ts-appear-image--view))
+    (when (and (eq (window-buffer (selected-window)) (current-buffer))
+               (eq markdown-ts-appear-image--cursor
+                   (get-char-property (point) 'markdown-ts-appear-image--view (selected-window))))
       (goto-char (1- (overlay-end
                      (markdown-ts-appear-image--view-owner markdown-ts-appear-image--cursor)))))
     (markdown-ts-appear-image--clear-cursor))
@@ -442,7 +443,7 @@ NOERROR and REST are the native line-motion arguments."
           (when-let* ((target (markdown-ts-appear-image--view-at-point))
                       ((not (eq target view))))
             (markdown-ts-appear-image--select
-             target (or (get-char-property (point) 'markdown-ts-appear-image--slice)
+             target (or (get-char-property (point) 'markdown-ts-appear-image--slice (selected-window))
                         (+ (markdown-ts-appear-image--view-top target)
                            (1- (markdown-ts-appear-image--view-rows target)))))))
         result)))))

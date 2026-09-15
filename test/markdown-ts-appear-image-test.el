@@ -79,8 +79,8 @@
       (markdown-ts-appear-image-test--buffer "![strip](image-slices.svg)\n\nafter\n"
         (let* ((view (markdown-ts-appear-image-test--view))
                (image (markdown-ts-appear-image--view-image view))
-              (slices (markdown-ts-appear-image--view-slices view))
-              (tiles (markdown-ts-appear-image--view-tiles view)))
+               (slices (markdown-ts-appear-image--view-slices view))
+               (tiles (markdown-ts-appear-image--view-tiles view)))
           (font-lock-flush) (font-lock-ensure)
           (markdown-ts-appear-image--update)
           (should (eq view (markdown-ts-appear-image-test--view)))
@@ -379,6 +379,29 @@
             (should (= index (get-char-property (point) 'markdown-ts-appear-image--slice)))
             (should (eq tiles (markdown-ts-appear-image--view-tiles view))))
           (should (equal (buffer-string) "![x](x.svg)\n\nafter\n")))))))
+
+(ert-deftest markdown-ts-appear-image-test-reentry-uses-selected-window-slice ()
+  (markdown-ts-appear-image-test--buffer "![tall](image-tall.svg)\n\nafter\n"
+    (let* ((owner (car markdown-ts-appear-image--objects))
+           (first (markdown-ts-appear-image-test--view))
+           (other (split-window-right)))
+      (set-window-buffer other (current-buffer))
+      (markdown-ts-appear-image--update)
+      (with-selected-window other
+        (let ((view (markdown-ts-appear-image--view-at-point)))
+          (unless view
+            (goto-char (overlay-start owner))
+            (setq view (markdown-ts-appear-image--view-at-point)))
+          (markdown-ts-appear-image--select
+           view (1- (length (markdown-ts-appear-image--view-slices view))))
+          (markdown-ts-appear-image--clear-cursor)))
+      (goto-char (overlay-end owner)) (forward-line 1)
+      (markdown-ts-appear-image--step
+       (lambda (&rest _) (goto-char (1- (overlay-end owner))) t) -1 nil nil)
+      (should (eq first markdown-ts-appear-image--cursor))
+      (should (= (1- (markdown-ts-appear-image--view-rows first))
+                 (markdown-ts-appear-image--view-index first)))
+      (should (= 0 (markdown-ts-appear-image--view-top first))))))
 
 (defun markdown-ts-appear-image-test-run-gui ()
   "Run graphical image regressions in a disposable Emacs process."
