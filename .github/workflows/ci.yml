@@ -170,6 +170,13 @@ jobs:
             -f markdown-ts-appear-image-test-run-gui \
             -ApplePersistenceIgnoreState YES
 
+      - name: Preserve native crash reports
+        if: ${{ failure() && matrix.mathjax }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: emacs-crash-reports
+          path: ~/Library/Logs/DiagnosticReports/Emacs*
+
   package-lint:
     runs-on: ubuntu-latest
 
