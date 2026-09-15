@@ -25,6 +25,8 @@ class Cursor:
         self.expected_checks = None
         self.errors = []
         self.references = {}
+        self.watch = None
+        self.paints = 0
 
     def feed(self, text):
         self.pending += text
@@ -55,6 +57,9 @@ class Cursor:
                         self.col = n - 1
                     elif command == "r":
                         self.row = self.col = 0
+                    elif command in "JK" and self.watch:
+                        if command == "J" or self.watch[0] <= self.row < self.watch[1]:
+                            self.paints += 1
                     self.pending = self.pending[match.end():]
                     continue
                 if self.pending.startswith("\x1b]"):
@@ -73,6 +78,14 @@ class Cursor:
                         self.checks += 1
                         if expected != (self.row, self.col):
                             self.errors.append((self.checks, expected, (self.row, self.col)))
+                    elif payload.startswith("777;watch;"):
+                        self.watch = tuple(map(int, payload.split(";")[2:]))
+                        self.paints = 0
+                    elif payload == "777;unwatch":
+                        self.checks += 1
+                        if self.paints:
+                            self.errors.append((self.checks, "no table repaint", self.paints))
+                        self.watch = None
                     elif payload.startswith("777;done;"):
                         self.expected_checks = int(payload.split(";")[2])
                     self.pending = self.pending[end + 1:]
@@ -96,6 +109,8 @@ class Cursor:
             elif char == "\t":
                 self.col = (self.col // 8 + 1) * 8
             elif char >= " " and not unicodedata.combining(char):
+                if self.watch and self.watch[0] <= self.row < self.watch[1]:
+                    self.paints += 1
                 self.col += 2 if unicodedata.east_asian_width(char) in "WF" else 1
 
 
@@ -142,7 +157,7 @@ def main():
         else:
             raise TimeoutError("Emacs redisplay regression timed out")
         code = process.wait(timeout=5)
-        if (code or cursor.errors or cursor.references or cursor.checks == 0
+        if (code or cursor.errors or cursor.references or cursor.watch or cursor.checks == 0
                 or cursor.checks != cursor.expected_checks):
             print("".join(transcript)[-8000:])
             raise AssertionError(

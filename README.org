@@ -87,6 +87,10 @@ Only three additional overlays are needed for the active row.  Resizing or
 editing rebuilds the view.  This integration uses internal row-layout functions
 from ~markdown-table-wrap~ while its public display API is finalized.
 
+Visual-line motions retain their display column across wrapped cells; logical
+line motions retain their source column.  Empty cell padding has no source
+character, so visual motion uses the nearest available character on that line.
+
 * Modal Editing
 
 By default, source is revealed whenever point enters an element.  To reveal
@@ -135,6 +139,8 @@ to each buffer and are removed when appear mode is disabled.
 - Math rendering uses ~mathjax-display~.  There are no separate cache, timeout,
   scaling, or centering options.  Unchanged formulas keep their previews while
   other text is edited; leaving an unedited formula restores its existing image.
+  Display formulas occupying their own lines are centered in each window;
+  inline formulas stay in the surrounding text.  Resizing uses the same image.
   Ordinary cursor movement updates visibility without rescanning the document.
   Missing math dependencies signal an error;
   initialization is not rolled back, so disable the mode manually after failure.

@@ -1137,7 +1137,7 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
   "Markdown fontifiers that replace or hide source markup.")
 
 (defun markdown-ts-appear--advice-bindings ()
-  "Return the private Markdown functions and their package advice."
+  "Return fontification and table-motion functions with their package advice."
   (append
    `((markdown-ts--fontify-delimiter
       . ,#'markdown-ts-appear--fontify-delimiter)
@@ -1150,7 +1150,8 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
      (markdown-ts--fontify-image
       . ,#'markdown-ts-appear--fontify-image)
      (markdown-ts--fontify-latex-block
-      . ,#'markdown-ts-appear--fontify-node))
+      . ,#'markdown-ts-appear--fontify-node)
+     (line-move . ,#'markdown-ts-appear-table--line-move))
    (mapcar (lambda (function)
              (cons function #'markdown-ts-appear--fontify-visible-markup))
            markdown-ts-appear--visible-fontifiers)))
@@ -1179,7 +1180,7 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
         (advice-remove (car binding) (cdr binding))))))
 
 (defun markdown-ts-appear--install-advice ()
-  "Install Markdown fontification advice."
+  "Install Markdown fontification and table-motion advice."
   (when-let* ((missing (markdown-ts-appear--missing-private-functions)))
     (error "Required private markdown-ts-mode functions are unavailable: %S"
            missing))

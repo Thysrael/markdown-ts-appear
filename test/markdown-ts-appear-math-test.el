@@ -216,6 +216,63 @@
         (markdown-ts-appear-math-test--enable)
         (should-not markdown-ts-appear-math-test--callbacks)))))
 
+(ert-deftest markdown-ts-appear-math-test-centers-standalone-display-math ()
+  (markdown-ts-appear-math-test--deferred
+    (dolist (source '("$$x+y$$\n\nafter\n" "  $$x\n+y$$  \n\nafter\n"))
+      (markdown-ts-appear-math-test--buffer source
+        (markdown-ts-appear-math-test--enable)
+        (markdown-ts-appear-math-test--deliver
+         (pop markdown-ts-appear-math-test--callbacks))
+        (let* ((preview (car (markdown-ts-appear-math-test--overlays)))
+               (image (overlay-get preview 'display))
+               (padding (overlay-get preview 'before-string)))
+          (should image)
+          (should (equal (get-text-property 0 'display padding)
+                         `(space :align-to (- center (0.5 . ,image)))))
+          (goto-char (overlay-start preview))
+          (markdown-ts-appear-start)
+          (run-hooks 'post-command-hook)
+          (should-not (overlay-get preview 'display))
+          (should-not (overlay-get preview 'before-string))
+          (markdown-ts-appear-stop)
+          (run-hooks 'post-command-hook)
+          (should (eq image (overlay-get preview 'display)))
+          (should (eq padding (overlay-get preview 'before-string)))
+          (should-not markdown-ts-appear-math-test--callbacks)
+          (should (equal source (buffer-substring-no-properties (point-min) (point-max)))))))))
+
+(ert-deftest markdown-ts-appear-math-test-inline-formulas-do-not-center ()
+  (markdown-ts-appear-math-test--deferred
+    (dolist (source '("before $x$ after\n" "before $$x$$ after\n"))
+      (markdown-ts-appear-math-test--buffer source
+        (markdown-ts-appear-math-test--enable)
+        (markdown-ts-appear-math-test--deliver
+         (pop markdown-ts-appear-math-test--callbacks))
+        (let ((preview (car (markdown-ts-appear-math-test--overlays))))
+          (should (overlay-get preview 'display))
+          (should-not (overlay-get preview 'before-string)))))))
+
+(ert-deftest markdown-ts-appear-math-test-centering-follows-surrounding-edits ()
+  (markdown-ts-appear-math-test--deferred
+    (markdown-ts-appear-math-test--buffer "$$x$$\n\nafter\n"
+      (markdown-ts-appear-math-test--enable)
+      (markdown-ts-appear-math-test--deliver
+       (pop markdown-ts-appear-math-test--callbacks))
+      (let* ((preview (car (markdown-ts-appear-math-test--overlays)))
+             (image (overlay-get preview 'display)))
+        (should (overlay-get preview 'before-string))
+        (goto-char (point-min))
+        (insert "before ")
+        (goto-char (point-max))
+        (run-hooks 'post-command-hook)
+        (should (eq image (overlay-get preview 'display)))
+        (should-not (overlay-get preview 'before-string))
+        (delete-region (point-min) (+ (point-min) 7))
+        (run-hooks 'post-command-hook)
+        (should (overlay-get preview 'before-string))
+        (should (eq image (overlay-get preview 'display)))
+        (should-not markdown-ts-appear-math-test--callbacks)))))
+
 (ert-deftest markdown-ts-appear-math-test-success-reveal-and-deduplication ()
   (markdown-ts-appear-math-test--deferred
     (markdown-ts-appear-math-test--buffer "text $x$ more\n"

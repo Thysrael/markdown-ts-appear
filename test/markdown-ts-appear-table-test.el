@@ -364,6 +364,36 @@
         (should (equal "中" (markdown-ts-appear-table-test--cursor-character
                               (cadr markdown-ts-appear-table--cursor-overlays))))))))
 
+(ert-deftest markdown-ts-appear-table-test-visual-motion-at-buffer-boundaries ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | abcd efgh ijkl mnop |"
+      18
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (markdown-ts-appear-stop)
+      (goto-char (point-max))
+      (markdown-ts-appear-table--post-command)
+      (let ((line-move-visual t) (last-command nil)
+            goal-column temporary-goal-column)
+        (line-move 1 t)
+        (should (= (point) (point-max)))
+        (should-error (line-move 1) :type 'end-of-buffer)
+        (goto-char (point-min))
+        (markdown-ts-appear-table--post-command)
+        (should-error (line-move -1) :type 'beginning-of-buffer)))))
+
+(ert-deftest markdown-ts-appear-table-test-plain-motion-keeps-native-semantics ()
+  (markdown-ts-appear-table-test--with-buffer "plain prose\nmore prose\n" 20
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (markdown-ts-appear-stop)
+      (let (calls)
+        (should (eq 'native-result
+                    (markdown-ts-appear-table--line-move
+                     (lambda (&rest args) (push args calls) 'native-result)
+                     7 t nil t)))
+        (should (equal calls '((7 t nil t))))))))
+
 (ert-deftest markdown-ts-appear-table-test-rebuilds-after-edit ()
   (markdown-ts-appear-table-test--with-buffer
       "| A | Description |\n|---|---|\n| x | before edit |\n\nafter\n"

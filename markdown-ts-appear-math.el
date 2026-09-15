@@ -95,8 +95,25 @@ POINT is nil when source tracking is paused.")
          (image (and visible (overlay-get preview 'markdown-ts-appear-math--image))))
     (unless (eq image (overlay-get preview 'display))
       (overlay-put preview 'display image))
+    (let ((padding
+           (and image (overlay-get preview 'markdown-ts-appear-math--standalone)
+                (or (overlay-get preview 'markdown-ts-appear-math--padding)
+                    (overlay-put
+                     preview 'markdown-ts-appear-math--padding
+                     (propertize " " 'face 'default
+                                 'display `(space :align-to (- center (0.5 . ,image)))))))))
+      (unless (eq padding (overlay-get preview 'before-string))
+        (overlay-put preview 'before-string padding)))
     (overlay-put preview 'face
                  (and visible (overlay-get preview 'mathjax-error) 'error))))
+
+(defun markdown-ts-appear-math--standalone-p (beg end)
+  "Return non-nil when only indentation surrounds the formula at BEG..END."
+  (save-excursion
+    (goto-char beg)
+    (skip-chars-backward " \t")
+    (and (bolp)
+         (progn (goto-char end) (skip-chars-forward " \t") (eolp)))))
 
 (defun markdown-ts-appear-math--request (preview math display-p)
   "Render MATH into PREVIEW; DISPLAY-P selects display rather than inline math."
@@ -170,6 +187,8 @@ POINT is nil when source tracking is paused.")
                      (equal (treesit-node-type closing) "latex_span_delimiter")
                      (< (treesit-node-start opening) (treesit-node-start closing)))
             (let* ((source (treesit-node-text node t))
+                   (display-p (and (member (treesit-node-text opening t)
+                                           '("$$" "\\[")) t))
                    (candidate (gethash beg existing))
                    (preview
                     (and candidate (= end (overlay-end candidate))
@@ -184,11 +203,11 @@ POINT is nil when source tracking is paused.")
                 (overlay-put preview 'markdown-ts-appear-math--input
                              (list (buffer-substring-no-properties
                                     (treesit-node-end opening) (treesit-node-start closing))
-                                   (and (member (treesit-node-text opening t)
-                                                '("$$" "\\["))
-                                        t)))
+                                   display-p))
                 (push preview markdown-ts-appear-math--objects)
                 (puthash beg preview existing))
+              (overlay-put preview 'markdown-ts-appear-math--standalone
+                           (and display-p (markdown-ts-appear-math--standalone-p beg end)))
               (puthash preview t current))))))
     (dolist (preview markdown-ts-appear-math--objects)
       (unless (gethash preview current)

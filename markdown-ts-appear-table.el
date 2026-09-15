@@ -226,7 +226,11 @@ Return a single nil entry when the buffer is not currently displayed."
   "Join display LINES and preserve the source newline when NEWLINE-P."
   (let ((display (concat (mapconcat #'identity lines "\n")
                          (and newline-p "\n"))))
-    (add-face-text-property 0 (length display) 'markdown-ts-table t display)
+    ;; A replacement string otherwise inherits unspecified attributes from
+    ;; its source character.  Moving its anchor across a shadow-faced pipe
+    ;; would recolor the entire row, including its before/after strings.
+    (add-face-text-property 0 (length display)
+                            '(markdown-ts-table default) t display)
     display))
 
 (defun markdown-ts-appear-table--row-bounds (row)
@@ -463,6 +467,160 @@ character.  The mapping can run backwards when multiple cells wrap."
     (setq markdown-ts-appear-table--cursor-row
           (list beg end window row-overlay))))
 
+(defun markdown-ts-appear-table--navigation (row)
+  "Return cached visual lines and a line-offset index for ROW.
+Each visual line contains (COLUMN . SOURCE) cursor stops in display order."
+  (or (overlay-get row 'markdown-ts-appear-table--navigation)
+      (let* ((display (overlay-get row 'markdown-ts-appear-table--display))
+             (index (make-hash-table :test #'eql))
+             (offset 0) (column 0) (number 0) stops lines)
+        (unless (overlay-get row 'markdown-ts-appear-table--map)
+          (overlay-put row 'markdown-ts-appear-table--map
+                       (markdown-ts-appear-table--source-map
+                        display (overlay-start row) (overlay-end row))))
+        (puthash 0 0 index)
+        (dolist (glyph (string-glyph-split display))
+          (if (equal glyph "\n")
+              (progn
+                (push (nreverse stops) lines)
+                (setq stops nil column 0 number (1+ number))
+                (puthash (1+ offset) number index))
+            (when-let* ((source (get-text-property
+                                0 'markdown-ts-appear-table--source glyph)))
+              (push (cons column source) stops))
+            (setq column (+ column (string-width glyph))))
+          (setq offset (+ offset (length glyph))))
+        (when (or stops (not (string-suffix-p "\n" display)))
+          (push (nreverse stops) lines))
+        (overlay-put row 'markdown-ts-appear-table--navigation
+                     (cons (vconcat (nreverse lines)) index)))))
+
+(defun markdown-ts-appear-table--goto-column (row line column)
+  "Move to ROW's source stop on visual LINE nearest COLUMN."
+  (let ((stops (aref (car (markdown-ts-appear-table--navigation row)) line))
+        best distance)
+    (dolist (stop stops)
+      (let ((delta (abs (- column (car stop)))))
+        (when (and (<= (point-min) (cdr stop) (point-max))
+                   (or (null distance) (< delta distance)))
+          (setq best (cdr stop) distance delta))))
+    (goto-char (or best (overlay-start row)))))
+
+(defun markdown-ts-appear-table--source-column (&optional target)
+  "Return the raw source column, or move to column TARGET, ignoring display."
+  (let ((end (if target (line-end-position) (point)))
+        (column 0))
+    (goto-char (line-beginning-position))
+    (while (and (< (point) end) (or (null target) (< column target)))
+      (let ((next (+ column (if (eq (char-after) ?\t)
+                               (- tab-width (% column tab-width))
+                             (char-width (char-after))))))
+        (if (and target (> next target))
+            (setq end (point))
+          (setq column next)
+          (forward-char))))
+    column))
+
+(defun markdown-ts-appear-table--motion-row (window)
+  "Return the wrapped row at point in WINDOW, including the active anchor."
+  (if (markdown-ts-appear-table--cursor-row-current-p window)
+      (nth 3 markdown-ts-appear-table--cursor-row)
+    (markdown-ts-appear-table--row-overlay-at-point window)))
+
+(defun markdown-ts-appear-table--visual-column (row)
+  "Return point's rendered column in ROW without counting hidden source."
+  (markdown-ts-appear-table--navigation row)
+  (let ((display (overlay-get row 'markdown-ts-appear-table--display)))
+    (if (= (point) (overlay-end row))
+        (string-width (substring display
+                                 (1+ (or (cl-position ?\n display :from-end t) -1))))
+      (let ((bounds (aref (overlay-get row 'markdown-ts-appear-table--map)
+                          (- (point) (overlay-start row)))))
+        (string-width (substring display (car (nth 2 bounds)) (car bounds)))))))
+
+(defun markdown-ts-appear-table--visual-step (function step column noerror rest)
+  "Move one visual STEP toward COLUMN, using FUNCTION outside wrapped rows.
+NOERROR and REST are passed to the native line motion when needed."
+  (let* ((window (selected-window))
+         (row (markdown-ts-appear-table--motion-row window)))
+    (if (null row)
+        (let ((last-command 'next-line))
+          (apply function step noerror rest)
+          (when-let* ((target (markdown-ts-appear-table--row-overlay-at-point window)))
+            (markdown-ts-appear-table--goto-column
+             target (if (> step 0) 0
+                      (1- (length (car (markdown-ts-appear-table--navigation target)))))
+             column)))
+      (let* ((navigation (markdown-ts-appear-table--navigation row))
+             (map (overlay-get row 'markdown-ts-appear-table--map))
+             (bounds (aref map (min (1- (length map)) (- (point) (overlay-start row)))))
+             (line (+ step (if (= (point) (overlay-end row))
+                               (1- (length (car navigation)))
+                             (gethash (car (nth 2 bounds)) (cdr navigation))))))
+        (if (and (>= line 0) (< line (length (car navigation))))
+            (markdown-ts-appear-table--goto-column row line column)
+          (let ((next (if (> step 0) (overlay-end row) (1- (overlay-start row)))))
+            (if (or (< next (point-min)) (> next (point-max))
+                    (and (> step 0) (= next (point-max))
+                         (not (eq (char-before next) ?\n))))
+                (unless noerror
+                  (signal (if (> step 0) 'end-of-buffer 'beginning-of-buffer) nil))
+              (goto-char next)
+              (if-let* ((target (markdown-ts-appear-table--row-overlay-at-point window)))
+                  (markdown-ts-appear-table--goto-column
+                   target (if (> step 0) 0
+                            (1- (length (car (markdown-ts-appear-table--navigation target)))))
+                   column)
+                (vertical-motion (cons column 0))))))))))
+
+(defun markdown-ts-appear-table--line-move
+    (function count &optional noerror &rest rest)
+  "Call line motion FUNCTION with COUNT, preserving wrapped-table columns.
+NOERROR and REST retain the native command's boundary behavior and options."
+  (if (not (and (eq markdown-ts-appear-table-style 'wrapped)
+                (markdown-ts-appear--active-p)
+                (not markdown-ts-appear--region)
+                (eq (window-buffer (selected-window)) (current-buffer))))
+      (apply function count noerror rest)
+    (let* ((window (selected-window))
+           (row (markdown-ts-appear-table--motion-row window)))
+      (if (null row)
+          (prog1 (apply function count noerror rest)
+            (when-let* ((target (markdown-ts-appear-table--row-overlay-at-point window))
+                        (column (or goal-column
+                                    (if (consp temporary-goal-column)
+                                        (car temporary-goal-column)
+                                      temporary-goal-column)))
+                        ((numberp column)))
+              (if line-move-visual
+                  (markdown-ts-appear-table--goto-column
+                   target (if (< count 0)
+                              (1- (length (car (markdown-ts-appear-table--navigation target))))
+                            0)
+                   column)
+                (markdown-ts-appear-table--source-column column))
+              (setq disable-point-adjustment t)))
+        (let* ((saved (if (consp temporary-goal-column)
+                          (car temporary-goal-column) temporary-goal-column))
+               (column (or goal-column
+                           (and (memq last-command '(next-line previous-line))
+                                (numberp saved) saved)
+                           (if line-move-visual
+                               (markdown-ts-appear-table--visual-column row)
+                             (save-excursion
+                               (markdown-ts-appear-table--source-column))))))
+          (setq temporary-goal-column column)
+          (if line-move-visual
+              (dotimes (_ (abs count))
+                (markdown-ts-appear-table--visual-step
+                 function (if (< count 0) -1 1) column noerror rest))
+            (let ((remaining (forward-line count)))
+              (markdown-ts-appear-table--source-column column)
+              (when (and (/= remaining 0) (not noerror))
+                (signal (if (> count 0) 'end-of-buffer 'beginning-of-buffer) nil))))
+          (setq disable-point-adjustment t)
+          t)))))
+
 (defun markdown-ts-appear-table--place-cursor ()
   "Anchor the row's display at the real source character under point."
   (pcase-let* ((`(,beg ,end ,_window ,row) markdown-ts-appear-table--cursor-row)
@@ -477,12 +635,13 @@ character.  The mapping can run backwards when multiple cells wrap."
       (move-overlay before beg position)
       (move-overlay anchor position (1+ position))
       (move-overlay after (1+ position) end))
-    ;; Reuse the surrounding strings throughout a visual line.  Only the
-    ;; short line's cursor property changes on ordinary horizontal motion.
+    ;; Keep the strings on fixed row endpoints: attaching them to the moving
+    ;; anchor leaks the following source face into extended backgrounds.
+    ;; Reuse them throughout a visual line; only its cursor property changes.
     (unless (equal line (overlay-get anchor 'markdown-ts-appear-table--line))
-      (overlay-put anchor 'before-string (substring display 0 (car line)))
+      (overlay-put before 'before-string (substring display 0 (car line)))
       (overlay-put anchor 'display (substring display (car line) (cdr line)))
-      (overlay-put anchor 'after-string (substring display (cdr line)))
+      (overlay-put after 'after-string (substring display (cdr line)))
       (overlay-put anchor 'markdown-ts-appear-table--line line)
       (overlay-put anchor 'markdown-ts-appear-table--offset nil))
     (let ((offset (- (car bounds) (car line)))
