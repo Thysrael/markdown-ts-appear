@@ -77,23 +77,23 @@ Use ~markdown-ts-table-auto-align~ for table alignment and
 ~markdown-ts-inline-images~ to display image files.
 
 With ~markdown-ts-inline-images~ enabled, local images on their own lines are
-displayed as cached image slices in graphical Emacs.  Use relative or absolute
-paths in ~![description](path)~ links.  Images that fit the preview are shown in
-full; larger images use a preview no taller than about half the window, with a
-visible row range.  Visual-line motions (~j/k~ when configured for visual lines)
-move through the slices, scrolling the preview as needed.  Clicking a slice
-selects it.  Source tracking reveals the original image link for editing.
-Visible slices have separate display anchors inside the existing link, so they
-can scroll through the window edge individually without inserting buffer text.
-Short link destinations also limit the preview height; all slices remain
-accessible with visual-line movement.
+displayed whole in graphical Emacs.  Use relative or absolute paths in
+~![description](path)~ links.  Large images are scaled down proportionally to
+fit the window width and usable height, reserving room for the caption and
+scroll margins.  Smaller images are not enlarged.  Path length does not limit
+the display height, and there is no cropped image panel or slice navigation.
 
-Set buffer-local ~line-spacing~ to ~0~ for seamless slices; Emacs otherwise
-adds the configured prose spacing between them.  ~markdown-ts-image-max-width~
-controls image width.  Window resizing reuses cached file data.  Toggle
+Visual-line motions (~j/k~ when configured for visual lines) retain native
+cursor movement: an image is one display object.  The document scrolls by
+pixels at image edges, with a short transition when crossing the whole image.
+Source tracking reveals the original image link for editing; the Markdown
+text itself is never changed by rendering or navigation.
+
+~markdown-ts-image-max-width~ sets an additional width limit.  Window resizing
+reuses cached file data and adjusts the whole image's scale.  Toggle
 ~markdown-ts-toggle-inline-images~ off and on to refresh changed image files.
 Remote images and images embedded within prose retain native handling rather
-than the sliced block-image view.  Wrapped table cells keep image labels.
+than the whole block-image view.  Wrapped table cells keep image labels.
 
 The ~wrapped~ table style displays canonical pipe-table source as a Unicode
 table fitted to each window.  Long cells wrap without changing buffer text;
