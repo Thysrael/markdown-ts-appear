@@ -608,18 +608,31 @@ NOERROR and REST retain the native command's boundary behavior and options."
                            (if line-move-visual
                                (markdown-ts-appear-table--visual-column row)
                              (save-excursion
-                               (markdown-ts-appear-table--source-column))))))
+                               (markdown-ts-appear-table--source-column)))))
+               (complete t))
           (setq temporary-goal-column column)
           (if line-move-visual
-              (dotimes (_ (abs count))
-                (markdown-ts-appear-table--visual-step
-                 function (if (< count 0) -1 1) column noerror rest))
+              (catch 'boundary
+                (dotimes (_ (abs count))
+                  (let ((position (point)))
+                    (markdown-ts-appear-table--visual-step
+                     function (if (< count 0) -1 1) column noerror rest)
+                    (when (= position (point))
+                      (setq complete nil)
+                      (throw 'boundary nil)))))
             (let ((remaining (forward-line count)))
-              (markdown-ts-appear-table--source-column column)
-              (when (and (/= remaining 0) (not noerror))
-                (signal (if (> count 0) 'end-of-buffer 'beginning-of-buffer) nil))))
+              ;; Native callers such as `move-end-of-line' deliberately
+              ;; overshoot a narrowed buffer with NOERROR.  Keep its boundary
+              ;; position instead of moving back into the same source line.
+              (if (and (= remaining 0)
+                       (or (<= count 0) (< (point) (point-max))
+                           (eq (char-before) ?\n)))
+                  (markdown-ts-appear-table--source-column column)
+                (setq complete nil)
+                (unless noerror
+                  (signal (if (> count 0) 'end-of-buffer 'beginning-of-buffer) nil)))))
           (setq disable-point-adjustment t)
-          t)))))
+          complete)))))
 
 (defun markdown-ts-appear-table--place-cursor ()
   "Anchor the row's display at the real source character under point."

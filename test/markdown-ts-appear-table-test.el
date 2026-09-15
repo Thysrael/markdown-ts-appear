@@ -394,6 +394,22 @@
                      7 t nil t)))
         (should (equal calls '((7 t nil t))))))))
 
+(ert-deftest markdown-ts-appear-table-test-narrowed-end-of-line ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | abcd efgh |\n"
+      18
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (markdown-ts-appear-stop)
+      (goto-char (point-min))
+      (forward-line 2)
+      (markdown-ts-appear-table--post-command)
+      ;; MELPA Evil temporarily narrows h/l to a two-character source span.
+      (save-restriction
+        (narrow-to-region (point-min) (+ (point) 2))
+        (move-end-of-line nil)
+        (should (= (point) (point-max)))))))
+
 (ert-deftest markdown-ts-appear-table-test-rebuilds-after-edit ()
   (markdown-ts-appear-table-test--with-buffer
       "| A | Description |\n|---|---|\n| x | before edit |\n\nafter\n"

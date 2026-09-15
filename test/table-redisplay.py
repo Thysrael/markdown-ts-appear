@@ -120,7 +120,10 @@ def main():
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
     command = [
         os.environ.get("EMACS", "emacs"), "-Q", "-nw",
-        "--eval", "(progn (require 'package) (package-initialize) (setq load-prefer-newer t))",
+        "--eval", "(progn (require 'package) "
+        "(when (getenv \"EMACS_TEST_PACKAGE_DIR\") "
+        "(setq package-user-dir (getenv \"EMACS_TEST_PACKAGE_DIR\"))) "
+        "(package-initialize) (setq load-prefer-newer t))",
         "-L", str(root), "-l", str(root / "test/markdown-ts-appear-table-redisplay-test.el"),
         "-f", "markdown-ts-appear-table-redisplay-run",
     ]
