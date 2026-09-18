@@ -50,6 +50,8 @@
 
 (defcustom markdown-ts-appear-enable-math-preview nil
   "Whether to preview unedited formulas with the optional MathJax package.
+Install `mathjax' separately; previews also require Node.js and SVG support.
+The backend is loaded only when this option is enabled for appear mode.
 Re-enable `markdown-ts-appear-mode' after changing this option."
   :type 'boolean)
 

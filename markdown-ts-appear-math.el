@@ -264,8 +264,12 @@ FORCE rechecks all preview visibility, for example after outline folding."
 (defun markdown-ts-appear-math--setup ()
   "Install math preview hooks and render eligible formulas."
   (unless (and (require 'mathjax nil t) (fboundp 'mathjax-display)
-               (mathjax-available-p) (image-type-available-p 'svg))
-    (user-error "MathJax previews require the mathjax package, Node.js and SVG support"))
+               (fboundp 'mathjax-available-p))
+    (user-error "Install the optional mathjax package with M-x package-install to enable math previews"))
+  (unless (mathjax-available-p)
+    (user-error "MathJax previews require Node.js; ensure node is on exec-path"))
+  (unless (image-type-available-p 'svg)
+    (user-error "MathJax previews require an Emacs build with SVG support"))
   (add-hook 'post-command-hook #'markdown-ts-appear-math--refresh 90 t)
   ;; Outline still emits this hook and provides no replacement.
   (with-suppressed-warnings ((obsolete outline-view-change-hook))

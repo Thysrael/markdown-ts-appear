@@ -126,7 +126,10 @@
                  (lambda (feature &optional filename noerror)
                    (unless (eq feature 'mathjax)
                      (funcall original feature filename noerror)))))
-        (should-error (markdown-ts-appear-math-test--enable) :type 'user-error)
+        (should (string-match-p
+                 "Install.*mathjax"
+                 (error-message-string
+                  (should-error (markdown-ts-appear-math-test--enable) :type 'user-error))))
         ;; Core setup deliberately does not roll back after an error.
         (should (markdown-ts-appear--active-p))
         (markdown-ts-appear-mode -1)
@@ -145,7 +148,10 @@
     (dolist (unavailable '(mathjax-available-p image-type-available-p))
       (markdown-ts-appear-math-test--buffer "$x$\n"
         (cl-letf (((symbol-function unavailable) (lambda (&rest _) nil)))
-          (should-error (markdown-ts-appear-math-test--enable) :type 'user-error)
+          (should (string-match-p
+                   (if (eq unavailable 'mathjax-available-p) "Node\\.js" "SVG")
+                   (error-message-string
+                    (should-error (markdown-ts-appear-math-test--enable) :type 'user-error))))
           (should (markdown-ts-appear--active-p))
           (should-not markdown-ts-appear-math-test--callbacks)
           (markdown-ts-appear-mode -1)

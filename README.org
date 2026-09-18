@@ -27,6 +27,8 @@ labels, width-aware table views, and MathJax previews.
 
 The required ~markdown-table-wrap~ dependency is available from
 [[https://melpa.org/#/markdown-table-wrap][MELPA]].  Ensure MELPA is configured in ~package-archives~ before installing.
+The package manager installs this dependency automatically; no separate
+~use-package markdown-table-wrap~ declaration is needed.
 
 #+begin_src emacs-lisp
 (use-package markdown-ts-appear
@@ -36,15 +38,21 @@ The required ~markdown-table-wrap~ dependency is available from
   :hook (markdown-ts-mode . markdown-ts-appear-mode))
 #+end_src
 
-For optional math previews, also install ~mathjax~ and enable the option below:
+MathJax is optional and is not installed as a dependency.  To opt in, install
+~mathjax~ explicitly and enable previews:
 
 #+begin_src emacs-lisp
 (use-package mathjax
   :ensure t
-  :defer t)
-
-(setq markdown-ts-appear-enable-math-preview t)
+  :defer t
+  :custom
+  (markdown-ts-appear-enable-math-preview t))
 #+end_src
+
+Install Node.js separately and use an Emacs build with SVG support.  Installing
+~mathjax~ does not install Node.js.  Math previews are disabled by default;
+the backend is loaded when previews are enabled, and rendering is requested
+only for eligible formulas.
 
 * Configuration
 
