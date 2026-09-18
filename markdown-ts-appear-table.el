@@ -409,9 +409,7 @@ character.  Navigation stops are offsets from the source-row overlay."
         (runs (make-hash-table :test #'eq))
         stops lines previous)
     (dolist (glyph (string-glyph-split display))
-      (let ((position (markdown-ts-appear-table--make-position
-                       :beg offset :end (+ offset (length glyph))
-                       :line line-index :column column)))
+      (let ((next (+ offset (length glyph))) position)
         (dotimes (index (length glyph))
           (when-let* ((source (get-text-property
                               index 'markdown-ts-appear-table--source glyph)))
@@ -426,6 +424,10 @@ character.  Navigation stops are offsets from the source-row overlay."
                 (put-text-property (+ offset index) (+ offset index 1)
                                    'markdown-ts-appear-table--source source display)))
             (when (and (<= beg source) (< source end))
+              ;; Generated padding needs no source-position object.
+              (unless position
+                (setq position (markdown-ts-appear-table--make-position
+                                :beg offset :end next :line line-index :column column)))
               (aset map (- source beg) position)
               (when (and (= index 0) (not (equal glyph "\n")))
                 (push (cons column (- source beg)) stops)))))
@@ -437,7 +439,7 @@ character.  Navigation stops are offsets from the source-row overlay."
               (setq line-beg (1+ offset) line-index (1+ line-index)
                     column 0 stops nil))
           (setq column (+ column (string-width glyph))))
-        (setq offset (markdown-ts-appear-table--position-end position))))
+        (setq offset next)))
     (when (or (> offset line-beg) (null lines))
       (push (markdown-ts-appear-table--make-line
              :beg line-beg :end offset :width column :stops (nreverse stops)) lines))
@@ -797,20 +799,10 @@ NOERROR and REST retain the native command's boundary behavior and options."
 
 (defun markdown-ts-appear-table--teardown ()
   "Remove wrapped-table hooks, timers and overlays."
-  (remove-hook 'post-command-hook #'markdown-ts-appear-table--post-command t)
-  (remove-hook 'after-change-functions #'markdown-ts-appear-table--after-change t)
-  (remove-hook 'window-configuration-change-hook
-               #'markdown-ts-appear-table--schedule-render t)
-  (remove-hook 'window-selection-change-functions
-               #'markdown-ts-appear-table--selection-change t)
-  (with-suppressed-warnings ((obsolete outline-view-change-hook))
-    (remove-hook 'outline-view-change-hook
-                 #'markdown-ts-appear-table--outline-change t))
   (when markdown-ts-appear-table--resize-timer
-    (cancel-timer markdown-ts-appear-table--resize-timer)
-    (setq markdown-ts-appear-table--resize-timer nil))
-  (setq markdown-ts-appear-table--dirty nil)
-  (markdown-ts-appear-table--delete-overlays))
+    (cancel-timer markdown-ts-appear-table--resize-timer))
+  (markdown-ts-appear-table--delete-overlays)
+  (markdown-ts-appear-table--detach))
 
 (defun markdown-ts-appear-table--detach ()
   "Detach table state inherited by an indirect buffer.
@@ -828,6 +820,7 @@ base buffer."
                  #'markdown-ts-appear-table--outline-change t))
   (setq markdown-ts-appear-table--overlays nil
         markdown-ts-appear-table--windows nil
+        markdown-ts-appear-table--view nil
         markdown-ts-appear-table--cursor-overlays nil
         markdown-ts-appear-table--cursor-row nil
         markdown-ts-appear-table--resize-timer nil

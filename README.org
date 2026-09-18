@@ -25,6 +25,9 @@ labels, width-aware table views, and MathJax previews.
 
 * Installation
 
+The required ~markdown-table-wrap~ dependency is available from
+[[https://melpa.org/#/markdown-table-wrap][MELPA]].  Ensure MELPA is configured in ~package-archives~ before installing.
+
 #+begin_src emacs-lisp
 (use-package markdown-ts-appear
   :vc (markdown-ts-appear
@@ -151,9 +154,9 @@ to each buffer and are removed when appear mode is disabled.
 
 #+begin_src shell
 MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS=1 \
-emacs --batch -Q -L . \
-  --eval '(progn (require (quote package)) (package-initialize))' \
-  -l ./markdown-ts-appear.el \
+emacs --batch -Q \
+  --eval '(progn (require (quote package)) (package-initialize) (setq load-prefer-newer t))' \
+  -L . \
   -l test/markdown-ts-appear-test.el \
   -l test/markdown-ts-appear-math-test.el \
   -l test/markdown-ts-appear-table-test.el \

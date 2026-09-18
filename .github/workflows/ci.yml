@@ -115,8 +115,9 @@ jobs:
 
       - name: Byte-compile
         run: |
-          emacs --batch -Q -L . \
+          emacs --batch -Q \
             --eval '(progn (require (quote package)) (package-initialize))' \
+            -L . \
             --eval '(setq byte-compile-error-on-warn t)' \
             -f batch-byte-compile \
             markdown-ts-appear-math.el \
@@ -145,8 +146,9 @@ jobs:
           MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS: "1"
           MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX: ${{ matrix.mathjax }}
         run: |
-          emacs --batch -Q -L . \
+          emacs --batch -Q \
             --eval '(progn (require (quote package)) (package-initialize))' \
+            -L . \
             -l test/markdown-ts-appear-test.el \
             -l test/markdown-ts-appear-math-test.el \
             -l test/markdown-ts-appear-table-test.el \

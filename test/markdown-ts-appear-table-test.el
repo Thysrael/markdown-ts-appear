@@ -545,7 +545,11 @@
       (goto-char (point-min))
       (run-hooks 'post-command-hook)
       (should markdown-ts-appear-table--cursor-overlays)
-      (markdown-ts-appear-mode -1)
+      (markdown-ts-appear-table--schedule-render)
+      (let ((timer markdown-ts-appear-table--resize-timer))
+        (should (memq timer timer-idle-list))
+        (markdown-ts-appear-mode -1)
+        (should-not (memq timer timer-idle-list)))
       (should-not markdown-ts-appear-table--overlays)
       (should-not markdown-ts-appear-table--cursor-overlays)
       (should-not (memq #'markdown-ts-appear-table--post-command
@@ -591,8 +595,10 @@
           (markdown-ts-appear-mode 1)
           (font-lock-ensure)
           (markdown-ts-appear-table--render 22)
+          (markdown-ts-appear-table--schedule-render)
           (let ((base-overlays (copy-sequence
-                                markdown-ts-appear-table--overlays)))
+                                markdown-ts-appear-table--overlays))
+                (timer markdown-ts-appear-table--resize-timer))
             (should (= 3 (markdown-ts-appear-table-test--row-count
                           base-overlays)))
             (should (= 3 (length base-overlays)))
@@ -602,7 +608,8 @@
             (with-current-buffer indirect
               (should-not markdown-ts-appear-mode)
               (should-not markdown-ts-appear-table--overlays))
-            (should (cl-every #'overlay-buffer base-overlays))))
+            (should (cl-every #'overlay-buffer base-overlays))
+            (should (memq timer timer-idle-list))))
       (when (buffer-live-p indirect)
         (kill-buffer indirect))
       (when (buffer-live-p base)
