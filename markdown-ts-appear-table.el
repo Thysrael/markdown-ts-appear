@@ -211,6 +211,13 @@
                    token))
                (string-trim text) t t))
         (setq text (markdown-table-wrap-pretty-render-inline-spans text))
+        ;; Use the surrounding major mode's code face, including theme settings.
+        (setq index 0)
+        (while (setq index (text-property-any
+                           index (length text) 'face 'markdown-table-wrap-pretty-code-face text))
+          (let ((end (next-single-property-change index 'face text (length text))))
+            (put-text-property index end 'face 'markdown-ts-code-span text)
+            (setq index end)))
         (if (null pipes) text
           (setq pipes (vconcat (nreverse pipes)))
           (replace-regexp-in-string

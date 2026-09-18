@@ -256,6 +256,22 @@
         (concat "│ Heading │ This is a long │\n"
                 "│         │ status value   │\n"))))))
 
+(ert-deftest markdown-ts-appear-table-test-inline-code-uses-native-face ()
+  (dolist (width '(38 80))
+    (let ((source (concat "| Bit | Name | Description |\n|---|---|---|\n"
+                         "| 18 | OSXSAVE | 启用扩展状态保存和恢复 `XSAVE/XRSTOR` 指令。 |\n")))
+      (markdown-ts-appear-table-test--with-buffer source width
+        (goto-char (point-min))
+        (search-forward "XSAVE/XRSTOR")
+        (let* ((display (markdown-ts-appear-table-test--row-display-at (point)))
+               (code (string-match "XSAVE/XRSTOR" display)))
+          (should code)
+          (should-not (string-match-p "`" display))
+          (dotimes (offset (length "XSAVE/XRSTOR"))
+            (should (memq 'markdown-ts-code-span
+                          (get-text-property (+ code offset) 'face display))))
+          (should (equal source (buffer-string))))))))
+
 (ert-deftest markdown-ts-appear-table-test-measures-emoji-and-escaped-pipes ()
   (markdown-ts-appear-table-test--with-buffer
       (concat "| Item | Note |\n"
@@ -413,7 +429,7 @@
       (let ((display (markdown-ts-appear-table-test--cursor-character
                       (cadr markdown-ts-appear-table--cursor-overlays))))
         (should (equal "|" display))
-        (should (memq 'markdown-table-wrap-pretty-code-face
+        (should (memq 'markdown-ts-code-span
                       (ensure-list (get-text-property 0 'face display))))))))
 
 (ert-deftest markdown-ts-appear-table-test-trailing-newline-is-outside-row ()
