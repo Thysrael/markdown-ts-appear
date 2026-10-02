@@ -55,37 +55,37 @@ The backend is loaded only when this option is enabled for appear mode.
 Re-enable `markdown-ts-appear-mode' after changing this option."
   :type 'boolean)
 
-(defcustom markdown-ts-appear-link-icon ""
+(defcustom markdown-ts-appear-link-icon ""
   "Icon displayed before rendered Markdown links.
 An empty string disables the icon."
   :type 'string)
 
-(defcustom markdown-ts-appear-image-icon ""
+(defcustom markdown-ts-appear-image-icon ""
   "Icon displayed before rendered Markdown images.
 An empty string disables the icon."
   :type 'string)
 
-(defcustom markdown-ts-appear-wikilink-icon ""
+(defcustom markdown-ts-appear-wikilink-icon "◆"
   "Icon displayed before rendered Markdown Wiki links.
 An empty string disables the icon."
   :type 'string)
 
-(defcustom markdown-ts-appear-code-fence-style 'raw
+(defcustom markdown-ts-appear-code-fence-style 'connected
   "How rendered fenced code blocks should display their delimiters."
   :type '(choice (const :tag "Raw Markdown" raw)
                  (const :tag "Connected Unicode lines" connected)))
 
-(defcustom markdown-ts-appear-render-callouts nil
+(defcustom markdown-ts-appear-render-callouts t
   "Whether to render callout labels at the start of block quotes."
   :type 'boolean)
 
-(defcustom markdown-ts-appear-block-quote-marker nil
+(defcustom markdown-ts-appear-block-quote-marker "▎"
   "Marker replacing each marker of a rendered block quote.
 When nil, preserve the original Markdown marker."
   :type '(choice (const :tag "Display raw marker" nil)
                  (string :tag "Marker")))
 
-(defcustom markdown-ts-appear-table-style 'raw
+(defcustom markdown-ts-appear-table-style 'wrapped
   "How rendered Markdown pipe tables should display.
 The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
   :type '(choice (const :tag "Raw Markdown" raw)

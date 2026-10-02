@@ -59,13 +59,13 @@ only for eligible formulas.
 | Option                                   | Default | Values and effect                                        |
 |------------------------------------------+---------+----------------------------------------------------------|
 | ~markdown-ts-appear-enable-math-preview~ | ~nil~   | ~t~ enables asynchronous math previews.                  |
-| ~markdown-ts-appear-link-icon~           | ~""~    | String before ordinary links; empty disables it.         |
-| ~markdown-ts-appear-image-icon~          | ~""~    | String before image links; empty disables it.            |
-| ~markdown-ts-appear-wikilink-icon~       | ~""~    | String before Wiki links; empty disables it.             |
-| ~markdown-ts-appear-code-fence-style~    | ~raw~   | ~raw~ or ~connected~ fences with a language label.       |
-| ~markdown-ts-appear-block-quote-marker~  | ~nil~   | Replacement string; ~nil~ keeps the original marker.     |
-| ~markdown-ts-appear-render-callouts~     | ~nil~   | ~t~ renders callout labels; does not implement folding.  |
-| ~markdown-ts-appear-table-style~         | ~raw~   | ~raw~, ~unicode~, or width-aware ~wrapped~ tables.       |
+| ~markdown-ts-appear-link-icon~           | ~""~ | String before ordinary links; empty disables it.         |
+| ~markdown-ts-appear-image-icon~          | ~""~ | String before image links; empty disables it.            |
+| ~markdown-ts-appear-wikilink-icon~       | ~"◆"~ | String before Wiki links; empty disables it.             |
+| ~markdown-ts-appear-code-fence-style~    | ~connected~ | ~raw~ or ~connected~ fences with a language label.   |
+| ~markdown-ts-appear-block-quote-marker~  | ~"▎"~ | Replacement string; ~nil~ keeps the original marker.     |
+| ~markdown-ts-appear-render-callouts~     | ~t~     | ~t~ renders callout labels; does not implement folding.  |
+| ~markdown-ts-appear-table-style~         | ~wrapped~ | ~raw~, ~unicode~, or width-aware ~wrapped~ tables.     |
 | ~markdown-ts-appear-table-wrap-resize-delay~ | ~0.2~ | Seconds to debounce ~wrapped~ table resize rendering. |
 
 Disable and re-enable ~markdown-ts-appear-mode~ after changing structural or
