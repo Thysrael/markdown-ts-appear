@@ -90,16 +90,15 @@
       (text-property-not-all beg end 'display nil)
       (text-property-any beg end 'line-height 0)))
 
-(ert-deftest markdown-ts-appear-test-visual-decorations-are-opt-in ()
-  (dolist (variable '(markdown-ts-appear-link-icon
-                      markdown-ts-appear-image-icon
-                      markdown-ts-appear-wikilink-icon))
-    (should (equal (default-value variable) "")))
-  (dolist (variable '(markdown-ts-appear-block-quote-marker
-                      markdown-ts-appear-render-callouts))
-    (should-not (default-value variable)))
-  (should (eq (default-value 'markdown-ts-appear-code-fence-style) 'raw))
-  (should (eq (default-value 'markdown-ts-appear-table-style) 'raw)))
+(ert-deftest markdown-ts-appear-test-visual-decorations-enabled-by-default ()
+  (dolist (setting '((markdown-ts-appear-link-icon . "")
+                     (markdown-ts-appear-image-icon . "")
+                     (markdown-ts-appear-wikilink-icon . "◆")
+                     (markdown-ts-appear-block-quote-marker . "▎")
+                     (markdown-ts-appear-render-callouts . t)
+                     (markdown-ts-appear-code-fence-style . connected)
+                     (markdown-ts-appear-table-style . wrapped)))
+    (should (equal (default-value (car setting)) (cdr setting)))))
 
 (ert-deftest markdown-ts-appear-test-code-fence-face-inherits-block-background ()
   (should
@@ -1152,7 +1151,8 @@
         'display)))))
 
 (ert-deftest markdown-ts-appear-test-can-disable-decorations ()
-  (let ((markdown-ts-appear-test--decorations nil))
+  (let ((markdown-ts-appear-test--decorations nil)
+        (markdown-ts-appear-render-callouts nil))
     (markdown-ts-appear-test--with-buffer
         "> quote\n\n[link](https://example.com)\n\n[[target|alias]]\n\n```c\nint x;\n```\n"
       (goto-char (point-min))
