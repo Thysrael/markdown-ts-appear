@@ -1,93 +1,93 @@
-#+title: markdown-ts-appear
+# markdown-ts-appear
 
-#+html: <p align="center"><strong>Rendered while reading. Source when editing.</strong></p>
+<p align="center"><strong>Rendered while reading. Source when editing.</strong></p>
 
-#+html: <p align="center"><a href="https://github.com/Thysrael/markdown-ts-appear/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Thysrael/markdown-ts-appear/ci.yml?branch=main&amp;style=for-the-badge&amp;logo=githubactions&amp;logoColor=white&amp;label=build" alt="Build status"></a> <a href="https://github.com/Thysrael/markdown-ts-appear/releases/latest"><img src="https://img.shields.io/github/v/release/Thysrael/markdown-ts-appear?display_name=tag&amp;sort=semver&amp;style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Latest release"></a> <a href="https://www.gnu.org/software/emacs/"><img src="https://img.shields.io/badge/Emacs-31.1%2B-7F5AB6?style=for-the-badge&amp;logo=gnuemacs&amp;logoColor=white" alt="Emacs 31.1+"></a> <a href="COPYING"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg?style=for-the-badge&amp;logo=opensourceinitiative&amp;logoColor=white" alt="GPL-3.0 license"></a></p>
+<p align="center"><a href="https://github.com/Thysrael/markdown-ts-appear/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Thysrael/markdown-ts-appear/ci.yml?branch=main&amp;style=for-the-badge&amp;logo=githubactions&amp;logoColor=white&amp;label=build" alt="Build status"></a> <a href="https://github.com/Thysrael/markdown-ts-appear/releases/latest"><img src="https://img.shields.io/github/v/release/Thysrael/markdown-ts-appear?display_name=tag&amp;sort=semver&amp;style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Latest release"></a> <a href="https://www.gnu.org/software/emacs/"><img src="https://img.shields.io/badge/Emacs-31.1%2B-7F5AB6?style=for-the-badge&amp;logo=gnuemacs&amp;logoColor=white" alt="Emacs 31.1+"></a> <a href="COPYING"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg?style=for-the-badge&amp;logo=opensourceinitiative&amp;logoColor=white" alt="GPL-3.0 license"></a></p>
 
-[[file:examples/appear.gif]]
+![Markdown TS Appear demonstration](examples/appear.gif)
 
 Can plain text keep its source while feeling almost rendered?
 
 Reveal the Markdown source of the smallest element at point, then restore its
 rendered appearance when point leaves.  This minor mode extends the built-in
-~markdown-ts-mode~ without changing buffer text.
+`markdown-ts-mode` without changing buffer text.
 
 Optional features include link icons, code fences, quote markers, callout
 labels, width-aware table views, and MathJax previews.
 
-* Requirements
+## Requirements
 
 - Emacs 31.1+ with Tree-sitter support.
-- The ~markdown~ and ~markdown-inline~ grammars.
-- ~markdown-table-wrap~ 0.2.0+.
-- For math previews: the ~mathjax~ package, Node.js, and an Emacs build with SVG
+- The `markdown` and `markdown-inline` grammars.
+- `markdown-table-wrap` 0.2.0+.
+- For math previews: the `mathjax` package, Node.js, and an Emacs build with SVG
   image support.
 
-* Installation
+## Installation
 
-The required ~markdown-table-wrap~ dependency is available from
-[[https://melpa.org/#/markdown-table-wrap][MELPA]].  Ensure MELPA is configured in ~package-archives~ before installing.
+The required `markdown-table-wrap` dependency is available from
+[MELPA](https://melpa.org/#/markdown-table-wrap).  Ensure MELPA is configured in `package-archives` before installing.
 The package manager installs this dependency automatically; no separate
-~use-package markdown-table-wrap~ declaration is needed.
+`use-package markdown-table-wrap` declaration is needed.
 
-#+begin_src emacs-lisp
+```emacs-lisp
 (use-package markdown-ts-appear
   :vc (markdown-ts-appear
        :url "https://github.com/Thysrael/markdown-ts-appear"
        :rev :newest)
   :hook (markdown-ts-mode . markdown-ts-appear-mode))
-#+end_src
+```
 
 MathJax is optional and is not installed as a dependency.  To opt in, install
-~mathjax~ explicitly and enable previews:
+`mathjax` explicitly and enable previews:
 
-#+begin_src emacs-lisp
+```emacs-lisp
 (use-package mathjax
   :ensure t
   :defer t
   :custom
   (markdown-ts-appear-enable-math-preview t))
-#+end_src
+```
 
 Install Node.js separately and use an Emacs build with SVG support.  Installing
-~mathjax~ does not install Node.js.  Math previews are disabled by default;
+`mathjax` does not install Node.js.  Math previews are disabled by default;
 the backend is loaded when previews are enabled, and rendering is requested
 only for eligible formulas.
 
-* Configuration
+## Configuration
 
 | Option                                   | Default | Values and effect                                        |
-|------------------------------------------+---------+----------------------------------------------------------|
-| ~markdown-ts-appear-enable-math-preview~ | ~nil~   | ~t~ enables asynchronous math previews.                  |
-| ~markdown-ts-appear-link-icon~           | ~""~ | String before ordinary links; empty disables it.         |
-| ~markdown-ts-appear-image-icon~          | ~""~ | String before image links; empty disables it.            |
-| ~markdown-ts-appear-wikilink-icon~       | ~"◆"~ | String before Wiki links; empty disables it.             |
-| ~markdown-ts-appear-code-fence-style~    | ~connected~ | ~raw~ or ~connected~ fences with a language label.   |
-| ~markdown-ts-appear-block-quote-marker~  | ~"▎"~ | Replacement string; ~nil~ keeps the original marker.     |
-| ~markdown-ts-appear-render-callouts~     | ~t~     | ~t~ renders callout labels; does not implement folding.  |
-| ~markdown-ts-appear-table-style~         | ~wrapped~ | ~raw~, ~unicode~, or width-aware ~wrapped~ tables.     |
-| ~markdown-ts-appear-table-wrap-resize-delay~ | ~0.2~ | Seconds to debounce ~wrapped~ table resize rendering. |
+| --- | --- | --- |
+| `markdown-ts-appear-enable-math-preview` | `nil` | `t` enables asynchronous math previews. |
+| `markdown-ts-appear-link-icon` | `""` | String before ordinary links; empty disables it. |
+| `markdown-ts-appear-image-icon` | `""` | String before image links; empty disables it. |
+| `markdown-ts-appear-wikilink-icon` | `"◆"` | String before Wiki links; empty disables it. |
+| `markdown-ts-appear-code-fence-style` | `connected` | `raw` or `connected` fences with a language label. |
+| `markdown-ts-appear-block-quote-marker` | `"▎"` | Replacement string; `nil` keeps the original marker. |
+| `markdown-ts-appear-render-callouts` | `t` | `t` renders callout labels; does not implement folding. |
+| `markdown-ts-appear-table-style` | `wrapped` | `raw`, `unicode`, or width-aware `wrapped` tables. |
+| `markdown-ts-appear-table-wrap-resize-delay` | `0.2` | Seconds to debounce `wrapped` table resize rendering. |
 
-Disable and re-enable ~markdown-ts-appear-mode~ after changing structural or
+Disable and re-enable `markdown-ts-appear-mode` after changing structural or
 math options in an active buffer.
 
 Callout types are case-insensitive.  Label colors use the current theme:
 
 | Type      | Face                                    |
-|-----------+-----------------------------------------|
-| NOTE      | ~link~                                  |
-| TIP       | ~success~                               |
-| IMPORTANT | ~font-lock-keyword-face~                |
-| WARNING   | ~warning~                               |
-| CAUTION   | ~error~                                 |
-| Other     | ~markdown-ts-appear-block-quote-marker~ |
+| --- | --- |
+| NOTE | `link` |
+| TIP | `success` |
+| IMPORTANT | `font-lock-keyword-face` |
+| WARNING | `warning` |
+| CAUTION | `error` |
+| Other | `markdown-ts-appear-block-quote-marker` |
 
-Configure ordinary colors and fonts through ~markdown-ts-mode~ faces, such as
-~markdown-ts-code-block~, ~markdown-ts-block-quote~, and ~markdown-ts-table~.
-Use ~markdown-ts-table-auto-align~ for table alignment and
-~markdown-ts-inline-images~ to display image files.
+Configure ordinary colors and fonts through `markdown-ts-mode` faces, such as
+`markdown-ts-code-block`, `markdown-ts-block-quote`, and `markdown-ts-table`.
+Use `markdown-ts-table-auto-align` for table alignment and
+`markdown-ts-inline-images` to display image files.
 
-The ~wrapped~ table style displays canonical pipe-table source as a Unicode
+The `wrapped` table style displays canonical pipe-table source as a Unicode
 table fitted to each window.  Long cells wrap without changing buffer text;
 when source tracking is active, moving point into a row reveals it for editing.
 When tracking is paused, the row at point stays rendered while preserving
@@ -96,7 +96,7 @@ Entering insert state edits that same source character.  Hidden markup uses
 the nearest visible character; normalized whitespace uses its display boundary.
 Only three additional overlays are needed for the active row.  Resizing or
 editing rebuilds the view.  This integration uses internal row-layout functions
-from ~markdown-table-wrap~ while its public display API is finalized.
+from `markdown-table-wrap` while its public display API is finalized.
 Window changes reuse the existing view when effective widths and fonts agree.
 Source and visual navigation share one lazily built row layout.
 
@@ -104,15 +104,15 @@ Visual-line motions retain their display column across wrapped cells; logical
 line motions retain their source column.  Empty cell padding has no source
 character, so visual motion uses the nearest available character on that line.
 
-* Modal Editing
+## Modal Editing
 
 By default, source is revealed whenever point enters an element.  To reveal
 only in insert state, use one of these configurations.  State hooks are local
 to each buffer and are removed when appear mode is disabled.
 
-** Evil
+### Evil
 
-#+begin_src emacs-lisp
+```emacs-lisp
 (defun my/markdown-appear-evil ()
   "Reveal Markdown source only in Evil insert state."
   (if markdown-ts-appear-mode
@@ -125,11 +125,11 @@ to each buffer and are removed when appear mode is disabled.
     (remove-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop t)))
 
 (add-hook 'markdown-ts-appear-mode-hook #'my/markdown-appear-evil)
-#+end_src
+```
 
-** Meow
+### Meow
 
-#+begin_src emacs-lisp
+```emacs-lisp
 (defun my/markdown-appear-meow ()
   "Reveal Markdown source only in Meow insert state."
   (if markdown-ts-appear-mode
@@ -142,14 +142,14 @@ to each buffer and are removed when appear mode is disabled.
     (remove-hook 'meow-insert-exit-hook #'markdown-ts-appear-stop t)))
 
 (add-hook 'markdown-ts-appear-mode-hook #'my/markdown-appear-meow)
-#+end_src
+```
 
-* Behavior Notes
+## Behavior Notes
 
-- Enabling appear mode turns on ~markdown-ts-hide-markup~.  Disabling it
+- Enabling appear mode turns on `markdown-ts-hide-markup`.  Disabling it
   removes the buffer-local override and uses the current default value.
 - Indirect buffers are unsupported; clones are detached from active tracking.
-- Math rendering uses ~mathjax-display~.  There are no separate cache, timeout,
+- Math rendering uses `mathjax-display`.  There are no separate cache, timeout,
   scaling, or centering options.  Unchanged formulas keep their previews while
   other text is edited; leaving an unedited formula restores its existing image.
   Display formulas occupying their own lines are centered in each window;
@@ -158,9 +158,9 @@ to each buffer and are removed when appear mode is disabled.
   Missing math dependencies signal an error;
   initialization is not rolled back, so disable the mode manually after failure.
 
-* Development
+## Development
 
-#+begin_src shell
+```sh
 MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS=1 \
 emacs --batch -Q \
   --eval '(progn (require (quote package)) (package-initialize) (setq load-prefer-newer t))' \
@@ -169,20 +169,20 @@ emacs --batch -Q \
   -l test/markdown-ts-appear-math-test.el \
   -l test/markdown-ts-appear-table-test.el \
   -f ert-run-tests-batch-and-exit
-#+end_src
+```
 
-Add ~MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1~ to require the optional math
+Add `MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1` to require the optional math
 dependencies and real SVG rendering tests.  Without the corresponding
 environment variable, tests with unavailable dependencies are skipped.
 
-Run ~python3 test/table-redisplay.py~ to check actual terminal cursor positions
+Run `python3 test/table-redisplay.py` to check actual terminal cursor positions
 and Evil insert transitions.  This uses a real PTY and the supplied three-column
 CJK regression table; it requires Python 3, Evil, and the Markdown grammars.
 
-~test/benchmark-table.el~ measures cold row entry, cached motion, and unchanged
+`test/benchmark-table.el` measures cold row entry, cached motion, and unchanged
 window notifications.  Initialize packages and put the library to measure first
-on ~load-path~, then load that file; timings include garbage collection.
+on `load-path`, then load that file; timings include garbage collection.
 
-* License
+## License
 
-GNU GPL version 3 or later.  See [[file:COPYING][COPYING]].
+GNU GPL version 3 or later.  See [COPYING](COPYING).
