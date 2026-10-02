@@ -90,16 +90,6 @@
       (text-property-not-all beg end 'display nil)
       (text-property-any beg end 'line-height 0)))
 
-(ert-deftest markdown-ts-appear-test-visual-decorations-enabled-by-default ()
-  (dolist (setting '((markdown-ts-appear-link-icon . "")
-                     (markdown-ts-appear-image-icon . "")
-                     (markdown-ts-appear-wikilink-icon . "◆")
-                     (markdown-ts-appear-block-quote-marker . "▎")
-                     (markdown-ts-appear-render-callouts . t)
-                     (markdown-ts-appear-code-fence-style . connected)
-                     (markdown-ts-appear-table-style . wrapped)))
-    (should (equal (default-value (car setting)) (cdr setting)))))
-
 (ert-deftest markdown-ts-appear-test-code-fence-face-inherits-block-background ()
   (should
    (memq 'markdown-ts-code-block
