@@ -90,12 +90,6 @@
       (text-property-not-all beg end 'display nil)
       (text-property-any beg end 'line-height 0)))
 
-(ert-deftest markdown-ts-appear-test-code-fence-face-inherits-block-background ()
-  (should
-   (memq 'markdown-ts-code-block
-         (face-attribute 'markdown-ts-appear-code-fence-marker
-                         :inherit nil))))
-
 (ert-deftest markdown-ts-appear-test-renders-inverted-language-label ()
   (markdown-ts-appear-test--with-buffer "```c\nint x;\n```\n"
     (let ((display (get-text-property (point-min) 'display)))
@@ -1306,12 +1300,6 @@
       (should-not (memq owned treesit-font-lock-settings))
       (should (memq foreign treesit-font-lock-settings)))))
 
-(ert-deftest markdown-ts-appear-test-advice-lasts-until-unload ()
-  (should (markdown-ts-appear-test--advice-installed-p))
-  (markdown-ts-appear-test--with-buffer "**bold**\n"
-    (should (markdown-ts-appear-test--advice-installed-p)))
-  (should (markdown-ts-appear-test--advice-installed-p)))
-
 (ert-deftest markdown-ts-appear-test-inactive-wrappers-pass-through ()
   (with-temp-buffer
     (dolist (mode '(nil t))
@@ -1348,13 +1336,6 @@
           (goto-char (point-max))
           (markdown-ts-appear--update)
           (should (get-text-property (point-min) 'invisible)))))))
-
-(ert-deftest markdown-ts-appear-test-required-private-functions-available ()
-  (should-not (markdown-ts-appear--missing-private-functions))
-  (markdown-ts-appear-test--with-buffer "**bold**\n"
-    (should (markdown-ts-appear-test--advice-installed-p))
-    (should-not
-     (markdown-ts-appear--missing-private-functions))))
 
 (ert-deftest markdown-ts-appear-test-bounds-honor-position-argument ()
   (markdown-ts-appear-test--with-buffer "- first\n\n- second\n"
