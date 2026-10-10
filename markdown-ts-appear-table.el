@@ -52,6 +52,16 @@
   :type 'number
   :group 'markdown-ts-appear)
 
+(defcustom markdown-ts-appear-table-zebra-stripe t
+  "When non-nil, give alternating wrapped table rows a background face."
+  :type 'boolean
+  :group 'markdown-ts-appear)
+
+(defface markdown-ts-appear-table-zebra
+  '((t :inherit lazy-highlight))
+  "Face for alternating data rows in rendered tables."
+  :group 'markdown-ts-appear)
+
 (defconst markdown-ts-appear-table--row-types
   '("pipe_table_header" "pipe_table_delimiter_row" "pipe_table_row")
   "Tree-sitter node types representing source rows of a pipe table.")
@@ -343,20 +353,31 @@ Return a single nil entry when the buffer is not currently displayed."
          (prefixes (mapcar #'markdown-ts-appear-table--prefix rows))
          (prefix-width (apply #'max 0 (mapcar #'string-width prefixes))))
     (pcase-dolist (`(,window ,width ,_font) windows)
-      (let ((widths (markdown-table-wrap-compute-widths
+      (let ((data-row-index 0)
+            (widths (markdown-table-wrap-compute-widths
                      (car cells) (cddr cells)
                      (max 1 (- width prefix-width))
                      (length aligns))))
         (cl-mapc
          (lambda (row contents prefix)
-           (markdown-ts-appear-table--make-overlay
-            row
-            (mapcar
-             (lambda (line) (concat prefix line))
-             (if (equal (treesit-node-type row) "pipe_table_delimiter_row")
-                 (list (markdown-table-wrap-pretty--render-separator-line widths aligns))
-               (markdown-table-wrap-pretty--render-row-lines contents widths aligns)))
-            window))
+           (let* ((type (treesit-node-type row))
+                  (lines
+                   (mapcar
+                    (lambda (line) (concat prefix line))
+                    (if (equal type "pipe_table_delimiter_row")
+                        (list (markdown-table-wrap-pretty--render-separator-line widths aligns))
+                      (markdown-table-wrap-pretty--render-row-lines contents widths aligns))))
+                  (zebra-p
+                   (and markdown-ts-appear-table-zebra-stripe
+                        (equal type "pipe_table_row")
+                        (cl-oddp (cl-incf data-row-index)))))
+             (when (equal type "pipe_table_header")
+               (setq data-row-index 0))
+             (when zebra-p
+               (dolist (line lines)
+                 (add-face-text-property 0 (length line)
+                                         'markdown-ts-appear-table-zebra t line)))
+             (markdown-ts-appear-table--make-overlay row lines window)))
          rows cells prefixes)))))
 
 (defun markdown-ts-appear-table--tables ()

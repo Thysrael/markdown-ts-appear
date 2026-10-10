@@ -66,6 +66,7 @@ only for eligible formulas.
 | `markdown-ts-appear-block-quote-marker` | `"▎"` | Replacement string; `nil` keeps the original marker. |
 | `markdown-ts-appear-render-callouts` | `t` | `t` renders callout labels; does not implement folding. |
 | `markdown-ts-appear-table-style` | `wrapped` | `raw`, `unicode`, or width-aware `wrapped` tables. |
+| `markdown-ts-appear-table-zebra-stripe` | `t` | Alternate backgrounds on wrapped table data rows. |
 | `markdown-ts-appear-table-wrap-resize-delay` | `0.2` | Seconds to debounce `wrapped` table resize rendering. |
 
 Disable and re-enable `markdown-ts-appear-mode` after changing structural or
@@ -84,6 +85,8 @@ Callout types are case-insensitive.  Label colors use the current theme:
 
 Configure ordinary colors and fonts through `markdown-ts-mode` faces, such as
 `markdown-ts-code-block`, `markdown-ts-block-quote`, and `markdown-ts-table`.
+Wrapped table stripe colors use the `markdown-ts-appear-table-zebra` face.
+Set `markdown-ts-appear-table-zebra-stripe` to `nil` to turn stripes off.
 Use `markdown-ts-table-auto-align` for table alignment and
 `markdown-ts-inline-images` to display image files.
 
