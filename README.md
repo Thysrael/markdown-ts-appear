@@ -86,7 +86,18 @@ Callout types are case-insensitive.  Label colors use the current theme:
 Configure ordinary colors and fonts through `markdown-ts-mode` faces, such as
 `markdown-ts-code-block`, `markdown-ts-block-quote`, and `markdown-ts-table`.
 Wrapped table stripe colors use the `markdown-ts-appear-table-zebra` face.
-Set `markdown-ts-appear-table-zebra-stripe` to `nil` to turn stripes off.
+By default it inherits `lazy-highlight`, so its background follows the active
+theme.  Customize the face directly with `M-x customize-face`, or set a fixed
+background in your Emacs configuration:
+
+```emacs-lisp
+(set-face-attribute 'markdown-ts-appear-table-zebra nil
+                    :background "#303846")
+```
+
+An explicit background overrides the theme-derived color.  Leave the face's
+background unspecified to keep following the active theme.  Set
+`markdown-ts-appear-table-zebra-stripe` to `nil` to turn stripes off.
 Use `markdown-ts-table-auto-align` for table alignment and
 `markdown-ts-inline-images` to display image files.
 
