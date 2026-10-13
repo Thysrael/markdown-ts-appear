@@ -1117,24 +1117,45 @@ at most one following space or tab and are not clipped to START or LIMIT."
   (with-suppressed-warnings ((obsolete outline-view-change-hook))
     (remove-hook 'outline-view-change-hook function t)))
 
-(defun markdown-ts-appear--delete-rendering-overlays ()
-  "Delete package icon overlays throughout the buffer."
+(defun markdown-ts-appear--delete-rendering-overlays (&optional beg end)
+  "Delete package icon overlays between BEG and END, or throughout the buffer."
   (without-restriction
-    (dolist (overlay (overlays-in (point-min) (point-max)))
+    (dolist (overlay (overlays-in (or beg (point-min)) (or end (point-max))))
       (when (or (overlay-get overlay 'markdown-ts-appear--image-label)
                 (overlay-get overlay 'markdown-ts-appear--link-icon))
         (delete-overlay overlay)))))
 
-(defun markdown-ts-appear--after-change (_beg _end _old-length)
-  "Invalidate icons after edits, including distant structural changes."
+(defun markdown-ts-appear--invalidate (beg end)
+  "Delete icons and refontify text between BEG and END."
+  (markdown-ts-appear--delete-rendering-overlays beg end)
+  (font-lock-flush beg end))
+
+(defun markdown-ts-appear--after-change (beg end _old-length)
+  "Invalidate the outermost block around an edit between BEG and END."
   (without-restriction
-    (markdown-ts-appear--delete-rendering-overlays)
-    ;; Rebuild unchanged icons too: their text may already be fontified.
-    (font-lock-flush (point-min) (point-max))))
+    (let ((node (treesit-node-at beg 'markdown))
+          block)
+      (while (and node (not (member (treesit-node-type node) '("section" "document"))))
+        (setq block node
+              node (treesit-node-parent node)))
+      (save-excursion
+        (markdown-ts-appear--invalidate
+         (min (progn (goto-char beg) (line-beginning-position))
+              (if block (treesit-node-start block) beg))
+         (max (progn (goto-char end) (line-end-position))
+              (if block (treesit-node-end block) end)))))))
+
+(defun markdown-ts-appear--structure-notifier (ranges _parser)
+  "Invalidate RANGES whose block structure changed, possibly far from an edit."
+  (without-restriction
+    (pcase-dolist (`(,beg . ,end) ranges)
+      (markdown-ts-appear--invalidate beg end))))
 
 (defun markdown-ts-appear--install-buffer-hooks ()
   "Install buffer-local lifecycle and change hooks."
   (add-hook 'after-change-functions #'markdown-ts-appear--after-change t t)
+  (treesit-parser-add-notifier
+   treesit-primary-parser #'markdown-ts-appear--structure-notifier)
   (add-hook 'change-major-mode-hook
             #'markdown-ts-appear--buffer-teardown nil t)
   (add-hook 'kill-buffer-hook
@@ -1145,6 +1166,11 @@ at most one following space or tab and are not clipped to START or LIMIT."
 (defun markdown-ts-appear--remove-buffer-hooks ()
   "Remove buffer-local lifecycle and change hooks."
   (remove-hook 'after-change-functions #'markdown-ts-appear--after-change t)
+  ;; Indirect clones share the base buffer's parser.
+  (when (and (treesit-parser-p treesit-primary-parser)
+             (eq (treesit-parser-buffer treesit-primary-parser) (current-buffer)))
+    (treesit-parser-remove-notifier
+     treesit-primary-parser #'markdown-ts-appear--structure-notifier))
   (remove-hook 'change-major-mode-hook
                #'markdown-ts-appear--buffer-teardown t)
   (remove-hook 'kill-buffer-hook

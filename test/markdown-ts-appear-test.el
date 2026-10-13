@@ -811,8 +811,8 @@
           (narrow-to-region (point-min) 7)
           (goto-char (point-min))
           (insert (if (= iteration 0) "```\n" "plain\n")))
-        (dolist (icon icons)
-          (should-not (overlay-buffer icon)))
+        (unless (= iteration 0)
+          (should (seq-every-p #'overlay-buffer icons)))
         (font-lock-ensure)
         (when (= iteration 0)
           (should-not
