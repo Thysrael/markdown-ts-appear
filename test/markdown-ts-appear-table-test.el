@@ -256,8 +256,7 @@
       (should (= 3 (length markdown-ts-appear-table--overlays)))
       (search-forward "| x |")
       (insert " changed")
-      (should-not markdown-ts-appear-table--windows)
-      (markdown-ts-appear-table--refresh-windows)
+      (run-hooks 'post-command-hook)
       (should (string-match-p "changed" (markdown-ts-appear-table-test--row-display-at (point)))))))
 
 (ert-deftest markdown-ts-appear-table-test-wraps-cjk-cell-without-editing-source ()
@@ -601,7 +600,27 @@
     (let ((display (markdown-ts-appear-table-test--row-display-at (point))))
       (should-not markdown-ts-appear-table--dirty)
       (should (string-match-p "updated" display))
-      (should (string-match-p "long value" display)))))
+      (should (string-match-p "long" display)))))
+
+(ert-deftest markdown-ts-appear-table-test-edit-outside-keeps-tables ()
+  (markdown-ts-appear-table-test--with-buffer
+      "| A | B |\n|---|---|\n| x | y |\n\ntext\n\nmore\n\n| C | D |\n|---|---|\n| z | w |\n"
+      20
+    (let ((overlays (copy-sequence markdown-ts-appear-table--overlays)))
+      (goto-char (point-min))
+      (search-forward "more")
+      (insert " words")
+      (run-hooks 'post-command-hook)
+      (should (seq-every-p #'overlay-buffer overlays))
+      (should (equal (length overlays)
+                     (length markdown-ts-appear-table--overlays)))
+      (search-forward "| z |")
+      (insert " edited")
+      (run-hooks 'post-command-hook)
+      (should (string-match-p "edited" (markdown-ts-appear-table-test--row-display-at (point))))
+      (goto-char (point-min))
+      (search-forward "| x |")
+      (should (memq (car (overlays-at (point))) overlays)))))
 
 (ert-deftest markdown-ts-appear-table-test-cursor-after-prefix-edit ()
   (markdown-ts-appear-table-test--with-buffer

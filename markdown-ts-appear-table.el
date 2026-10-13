@@ -86,8 +86,8 @@
 
 (cl-defstruct (markdown-ts-appear-table--layout
                (:constructor markdown-ts-appear-table--make-layout))
-  "A row's display and lazily constructed, shared motion geometry."
-  display map lines)
+  "A row's display, render-time start and lazily constructed motion geometry."
+  display origin map lines)
 
 (cl-defstruct (markdown-ts-appear-table--line
                (:constructor markdown-ts-appear-table--make-line))
@@ -100,7 +100,7 @@
   beg end line column)
 
 (defvar-local markdown-ts-appear-table--dirty nil
-  "Non-nil when wrapped tables need rebuilding after an edit.")
+  "Marker ranges around edits whose tables need rebuilding.")
 
 (defvar-local markdown-ts-appear-table--view nil
   "Last visible source region applied to wrapped-table overlays.")
@@ -325,8 +325,9 @@ Apply FACE to line contents before adding the fallback faces."
                                'markdown-ts-appear-table--source source display)))))))
 
 (defun markdown-ts-appear-table--make-overlay
-    (row lines window &optional stripe-p)
+    (row lines window table &optional stripe-p)
   "Display LINES over source ROW, restricted to WINDOW when non-nil.
+TABLE identifies the overlays rendered together for one table.
 STRIPE-P marks alternate data rows for optional background shading."
   (pcase-let* ((`(,beg . ,end) (markdown-ts-appear-table--row-bounds row))
                (newline-p (eq (char-before end) ?\n))
@@ -342,8 +343,8 @@ STRIPE-P marks alternate data rows for optional background shading."
     (overlay-put overlay 'markdown-ts-appear-table--stripe-face stripe-face)
     (overlay-put overlay 'display display)
     (overlay-put overlay 'markdown-ts-appear-table--layout
-                 (markdown-ts-appear-table--make-layout :display display))
-    (overlay-put overlay 'markdown-ts-appear-table--wrapped t)
+                 (markdown-ts-appear-table--make-layout :display display :origin beg))
+    (overlay-put overlay 'markdown-ts-appear-table--wrapped table)
     (overlay-put overlay 'evaporate t)
     (when window
       (overlay-put overlay 'window window))
@@ -368,7 +369,8 @@ STRIPE-P marks alternate data rows for optional background shading."
                             (t 'left))))
                   (markdown-ts-appear-table--row-cells (cadr rows))))
          (prefixes (mapcar #'markdown-ts-appear-table--prefix rows))
-         (prefix-width (apply #'max 0 (mapcar #'string-width prefixes))))
+         (prefix-width (apply #'max 0 (mapcar #'string-width prefixes)))
+         (id (list 'table)))
     (pcase-dolist (`(,window ,width ,_font) windows)
       (let ((data-row-index 0)
             (widths (markdown-table-wrap-compute-widths
@@ -387,7 +389,7 @@ STRIPE-P marks alternate data rows for optional background shading."
                   (stripe-p
                    (and (equal type "pipe_table_row")
                         (cl-evenp (cl-incf data-row-index)))))
-             (markdown-ts-appear-table--make-overlay row lines window stripe-p)))
+             (markdown-ts-appear-table--make-overlay row lines window id stripe-p)))
          rows cells prefixes)))))
 
 (defun markdown-ts-appear-table--refresh-stripes ()
@@ -411,14 +413,14 @@ STRIPE-P marks alternate data rows for optional background shading."
   (markdown-ts-appear-table--update-cursor-row)
   (force-window-update (current-buffer)))
 
-(defun markdown-ts-appear-table--tables ()
-  "Return current buffer's pipe-table syntax nodes."
+(defun markdown-ts-appear-table--tables (&optional beg end)
+  "Return current buffer's pipe-table syntax nodes, optionally within BEG..END."
   (with-memoization markdown-ts-appear-table--query
     (treesit-query-compile 'markdown '((pipe_table) @table)))
   (when-let* ((parser (car (treesit-parser-list nil 'markdown t))))
     (treesit-query-capture
      (treesit-parser-root-node parser) markdown-ts-appear-table--query
-     nil nil t)))
+     beg end t)))
 
 (defun markdown-ts-appear-table--render (&optional width)
   "Rebuild wrapped tables, overriding each window width with WIDTH when set."
@@ -460,6 +462,8 @@ DISPLAY-P non-nil restores their rendered display."
 Hidden markup and discarded whitespace use the nearest surviving source
 character.  Navigation stops are offsets from the source-row overlay."
   (let ((display (markdown-ts-appear-table--layout-display layout))
+        ;; Display sources keep render-time positions; rows move with edits above.
+        (shift (- beg (markdown-ts-appear-table--layout-origin layout)))
         (map (make-vector (- end beg) nil))
         (offset 0)
         (line-beg 0) (line-index 0) (column 0)
@@ -480,6 +484,7 @@ character.  Navigation stops are offsets from the source-row overlay."
                 (setq source (+ (car source) source-index))
                 (put-text-property (+ offset index) (+ offset index 1)
                                    'markdown-ts-appear-table--source source display)))
+            (setq source (+ source shift))
             (when (and (<= beg source) (< source end))
               ;; Generated padding needs no source-position object.
               (unless position
@@ -792,8 +797,24 @@ NOERROR and REST retain the native command's boundary behavior and options."
   (when (and (eq markdown-ts-appear-table-style 'wrapped)
              (markdown-ts-appear--active-p))
     (if markdown-ts-appear-table--dirty
-        (markdown-ts-appear-table--render)
+        (markdown-ts-appear-table--render-edited)
       (markdown-ts-appear-table--update-visibility))))
+
+(defun markdown-ts-appear-table--render-edited ()
+  "Render tables around edits that have lost their overlays."
+  ;; Let `markdown-ts-appear-table--update-visibility' hide new rows too.
+  (markdown-ts-appear-table--set-region-display markdown-ts-appear-table--view t)
+  (setq markdown-ts-appear-table--view nil)
+  (without-restriction
+    (pcase-dolist (`(,beg . ,end) markdown-ts-appear-table--dirty)
+      (dolist (table (markdown-ts-appear-table--tables beg end))
+        (unless (or (markdown-ts--outline-invisible-p (treesit-node-start table))
+                    (get-char-property (treesit-node-start table)
+                                       'markdown-ts-appear-table--wrapped))
+          (markdown-ts-appear-table--render-table
+           table markdown-ts-appear-table--windows)))))
+  (setq markdown-ts-appear-table--dirty nil)
+  (markdown-ts-appear-table--update-visibility))
 
 (defun markdown-ts-appear-table--selection-change (_window)
   "Update the interactive rendered row after a window selection change."
@@ -801,10 +822,25 @@ NOERROR and REST retain the native command's boundary behavior and options."
              (markdown-ts-appear--active-p))
     (markdown-ts-appear-table--update-cursor-row)))
 
-(defun markdown-ts-appear-table--after-change (_beg _end _old-length)
-  "Invalidate wrapped tables after a buffer edit."
-  (setq markdown-ts-appear-table--dirty t)
-  (markdown-ts-appear-table--delete-overlays))
+(defun markdown-ts-appear-table--after-change (beg end _old-length)
+  "Invalidate wrapped tables on lines around the edit between BEG and END."
+  (save-excursion
+    (markdown-ts-appear-table--invalidate
+     (progn (goto-char beg) (line-beginning-position 0))
+     (progn (goto-char end) (line-end-position 2)))))
+
+(defun markdown-ts-appear-table--invalidate (beg end)
+  "Drop overlays of tables between BEG and END and queue them for rebuilding."
+  (push (cons (copy-marker beg) (copy-marker end t)) markdown-ts-appear-table--dirty)
+  (when-let* ((tables (seq-keep (lambda (overlay)
+                                  (overlay-get overlay 'markdown-ts-appear-table--wrapped))
+                                (overlays-in beg end))))
+    (markdown-ts-appear-table--delete-cursor-overlays)
+    (dolist (overlay markdown-ts-appear-table--overlays)
+      (when (memq (overlay-get overlay 'markdown-ts-appear-table--wrapped) tables)
+        (delete-overlay overlay)))
+    (setq markdown-ts-appear-table--overlays
+          (seq-filter #'overlay-buffer markdown-ts-appear-table--overlays))))
 
 (defun markdown-ts-appear-table--refresh-windows ()
   "Rebuild tables only when the window geometry or fonts have changed."

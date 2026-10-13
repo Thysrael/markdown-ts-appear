@@ -1149,7 +1149,9 @@ at most one following space or tab and are not clipped to START or LIMIT."
   "Invalidate RANGES whose block structure changed, possibly far from an edit."
   (without-restriction
     (pcase-dolist (`(,beg . ,end) ranges)
-      (markdown-ts-appear--invalidate beg end))))
+      (markdown-ts-appear--invalidate beg end)
+      (when (memq #'markdown-ts-appear-table--after-change after-change-functions)
+        (markdown-ts-appear-table--invalidate beg end)))))
 
 (defun markdown-ts-appear--install-buffer-hooks ()
   "Install buffer-local lifecycle and change hooks."
