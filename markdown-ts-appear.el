@@ -176,6 +176,9 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
 (defvar markdown-ts-appear--callout-backgrounds nil
   "Cached callout backgrounds, keyed by accent face and its current colors.")
 
+(defvar markdown-ts-appear--quote-prefix-query nil
+  "Compiled quote marker query.")
+
 (defun markdown-ts-appear--active-p ()
   "Return non-nil when reveal rendering owns this buffer's text."
   (and markdown-ts-appear-mode
@@ -714,11 +717,14 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
   "Return structural quote prefixes in NODE intersecting START through LIMIT.
 Each prefix is a list of marker bounds in source order.  Bounds include
 at most one following space or tab and are not clipped to START or LIMIT."
+  (with-memoization markdown-ts-appear--quote-prefix-query
+    (treesit-query-compile
+     'markdown '([(block_quote_marker) (block_continuation)] @prefix)))
   (save-match-data
     (save-excursion
       (let (prefixes)
         (dolist (prefix (treesit-query-capture
-                         node '([(block_quote_marker) (block_continuation)] @prefix)
+                         node markdown-ts-appear--quote-prefix-query
                          start limit t))
           (goto-char (treesit-node-start prefix))
           (let ((end (treesit-node-end prefix))
