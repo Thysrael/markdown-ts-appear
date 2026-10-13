@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-13",
+  "machine": "Apple M4 Pro, 12 logical processors, macOS",
+  "emacs": "32.0.50",
+  "graphical": true,
+  "rounds_per_provider": 3,
+  "byte_compiled": true,
+  "native_jit": false,
+  "latex_precompile": true,
+  "latex_to_svg_jobs": 12,
+  "units": "milliseconds",
+  "aggregation": "Medians; uncached/repeat pool 20 requests per round, all other fields summarize three rounds",
+  "mathjax": {
+    "first_ms": 158.663,
+    "first_enqueue_ms": 0.479,
+    "uncached_ms": 1.7824,
+    "repeat_ms": 1.3161,
+    "burst_30_ms": 34.431,
+    "open_30_ms": 79.4239,
+    "reopen_30_ms": 63.9579,
+    "motion_ms_per_command": 0.3458
+  },
+  "latex": {
+    "first_ms": 387.0471,
+    "first_enqueue_ms": 171.8881,
+    "uncached_ms": 204.325,
+    "repeat_ms": 0.025,
+    "burst_30_ms": 869.463,
+    "open_30_ms": 968.533,
+    "reopen_30_ms": 37.5321,
+    "motion_ms_per_command": 1.1245
+  },
+  "ratex": {
+    "first_ms": 19.5401,
+    "first_enqueue_ms": 0.9952,
+    "uncached_ms": 13.898,
+    "repeat_ms": 0.026,
+    "burst_30_ms": 284.2321,
+    "open_30_ms": 322.7482,
+    "reopen_30_ms": 38.692,
+    "motion_ms_per_command": 1.1269
+  }
+}

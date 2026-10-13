@@ -1,284 +1,119 @@
-;;; markdown-ts-appear-math.el --- Internal MathJax previews -*- lexical-binding: t; -*-
+;;; markdown-ts-appear-math.el --- Coordinate latex-to-svg previews -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Thysrael
-
-;; Author: Thysrael <thysrael@163.com>
-;; Assisted-by: OpenCode:gpt-5.6-sol
-;; Maintainer: Thysrael <thysrael@163.com>
-;; Keywords: text, convenience
-;; URL: https://github.com/Thysrael/markdown-ts-appear
-
-;; This file is not part of GNU Emacs.
-
-;; This program is free software: you can redistribute it and/or modify
-;; it under the terms of the GNU General Public License as published by
-;; the Free Software Foundation, either version 3 of the License, or
-;; (at your option) any later version.
-
-;; This program is distributed in the hope that it will be useful,
-;; but WITHOUT ANY WARRANTY; without even the implied warranty of
-;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-;; GNU General Public License for more details.
-
-;; You should have received a copy of the GNU General Public License
-;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
 
-;; Internal MathJax preview support for `markdown-ts-appear-mode'.
-;; This library does not define a separate minor mode.
+;; The optional latex-to-svg Markdown adaptor owns math detection, rendering
+;; and overlays.  This bridge supplies appear's source-reveal policy and
+;; remembers whether appear or the user enabled the adaptor.
 
 ;;; Code:
 
-(require 'markdown-ts-mode)
-(require 'seq)
-(require 'subr-x)
-
-(declare-function mathjax-available-p "mathjax")
-(declare-function mathjax-display "mathjax")
+(declare-function latex-to-svg-for-markdown-mode "latex-to-svg-for-markdown")
+(declare-function latex-to-svg-frontend-span-at "latex-to-svg-frontend")
 (declare-function markdown-ts-appear--active-p "markdown-ts-appear")
-(declare-function markdown-ts-appear--add-outline-hook "markdown-ts-appear")
-(declare-function markdown-ts-appear--remove-outline-hook "markdown-ts-appear")
-(declare-function markdown-ts-appear--literal-block-at "markdown-ts-appear")
-(declare-function markdown-ts-appear--node-ancestor "markdown-ts-appear")
-(declare-function markdown-ts-appear--region-visible-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--update "markdown-ts-appear")
 
 (defvar markdown-ts-appear-enable-math-preview)
-(defvar markdown-ts-appear--region)
+(defvar markdown-ts-appear--last-point)
+(defvar latex-to-svg-frontend-reveal)
+(defvar latex-to-svg-frontend--last-point)
+(defvar latex-to-svg-frontend--reconcile-timer)
+(defvar latex-to-svg-frontend--initial-render-timer)
 
-(defvar-local markdown-ts-appear-math--objects nil
-  "Formula overlays, each holding its source, image and pending render buffer.")
+(defvar-local markdown-ts-appear-math--owned nil
+  "Non-nil when appear enabled the Markdown math adaptor.")
 
-(defvar markdown-ts-appear-math--query nil
-  "Compiled math query, shared by all inline parsers.")
+(defvar-local markdown-ts-appear-math--saved-reveal nil
+  "Previous (LOCAL-P VALUE) of the math source-reveal option.")
 
-(defvar-local markdown-ts-appear-math--scan-tick nil
-  "Text modification tick of the last formula scan.")
+(defun markdown-ts-appear-math--reveal-p (_kind)
+  "Return non-nil while appear tracks source at point, for any math _KIND."
+  (and (markdown-ts-appear--active-p)
+       (memq #'markdown-ts-appear--update post-command-hook)))
 
-(defvar-local markdown-ts-appear-math--view nil
-  "Last (POINT REVEAL-BEG REVEAL-END), or nil to recheck all previews.
-POINT is nil when source tracking is paused.")
+(defun markdown-ts-appear-math--span-at (position)
+  "Return the math span owned by latex-to-svg at POSITION, or nil."
+  (and (bound-and-true-p latex-to-svg-frontend-mode)
+       (fboundp 'latex-to-svg-frontend-span-at)
+       (latex-to-svg-frontend-span-at position)))
 
-(defun markdown-ts-appear-math--delete (preview)
-  "Remove PREVIEW and invalidate its pending render, if any."
-  (let ((staging (overlay-get preview 'markdown-ts-appear-math--buffer)))
-    (delete-overlay preview)
-    (setq markdown-ts-appear-math--scan-tick nil
-          markdown-ts-appear-math--view nil
-          markdown-ts-appear-math--objects
-          (delq preview markdown-ts-appear-math--objects))
-    (when (buffer-live-p staging)
-      (kill-buffer staging))))
+(defun markdown-ts-appear-math--contains-p (beg end)
+  "Return non-nil when BEG..END is inside external math source."
+  (when-let* ((span (markdown-ts-appear-math--span-at beg)))
+    (and (< beg (nth 2 span)) (<= end (nth 2 span)))))
 
-(defun markdown-ts-appear-math--clear (&optional beg end)
-  "Clear previews, or only those whose source is edited between BEG and END."
-  (setq markdown-ts-appear-math--scan-tick nil
-        markdown-ts-appear-math--view nil)
-  (dolist (preview markdown-ts-appear-math--objects)
-    (when (or (null beg) (not (overlay-buffer preview))
-              (and (< (overlay-start preview) end)
-                   (> (overlay-end preview) beg)))
-      (markdown-ts-appear-math--delete preview))))
+(defun markdown-ts-appear-math--revealed-region ()
+  "Return the math source bounds that table overlays must leave visible."
+  (when (or (bound-and-true-p isearch-mode)
+            (markdown-ts-appear-math--reveal-p nil))
+    (when-let* ((span (markdown-ts-appear-math--span-at (point))))
+      (cons (nth 1 span) (nth 2 span)))))
 
-(defun markdown-ts-appear-math--eligible-p (beg end)
-  "Return non-nil when BEG through END may cover source with a preview."
-  (and markdown-ts-appear-enable-math-preview (markdown-ts-appear--active-p)
-       (not (and (memq #'markdown-ts-appear--update post-command-hook)
-                 (<= beg (point)) (< (point) end)))
-       (not (markdown-ts-appear--region-visible-p beg end))
-       (not (markdown-ts--outline-invisible-p beg))))
+(defun markdown-ts-appear-math--restore-reveal ()
+  "Restore the previous reveal option if it is still owned by appear."
+  (when markdown-ts-appear-math--saved-reveal
+    (when (eq latex-to-svg-frontend-reveal #'markdown-ts-appear-math--reveal-p)
+      (if (car markdown-ts-appear-math--saved-reveal)
+          (setq-local latex-to-svg-frontend-reveal
+                      (cadr markdown-ts-appear-math--saved-reveal))
+        (kill-local-variable 'latex-to-svg-frontend-reveal)))
+    (setq markdown-ts-appear-math--saved-reveal nil)))
 
-(defun markdown-ts-appear-math--display (preview)
-  "Show PREVIEW's saved image unless its source is currently revealed."
-  (let* ((visible (markdown-ts-appear-math--eligible-p
-                   (overlay-start preview) (overlay-end preview)))
-         (image (and visible (overlay-get preview 'markdown-ts-appear-math--image))))
-    (unless (eq image (overlay-get preview 'display))
-      (overlay-put preview 'display image))
-    (let ((padding
-           (and image (overlay-get preview 'markdown-ts-appear-math--standalone)
-                (or (overlay-get preview 'markdown-ts-appear-math--padding)
-                    (overlay-put
-                     preview 'markdown-ts-appear-math--padding
-                     (propertize " " 'face 'default
-                                 'display `(space :align-to (- center (0.5 . ,image)))))))))
-      (unless (eq padding (overlay-get preview 'before-string))
-        (overlay-put preview 'before-string padding)))
-    (overlay-put preview 'face
-                 (and visible (overlay-get preview 'mathjax-error) 'error))))
-
-(defun markdown-ts-appear-math--standalone-p (beg end)
-  "Return non-nil when only indentation surrounds the formula at BEG..END."
-  (save-excursion
-    (goto-char beg)
-    (skip-chars-backward " \t")
-    (and (bolp)
-         (progn (goto-char end) (skip-chars-forward " \t") (eolp)))))
-
-(defun markdown-ts-appear-math--request (preview math display-p)
-  "Render MATH into PREVIEW; DISPLAY-P selects display rather than inline math."
-  (let ((target (current-buffer))
-        (source (overlay-get preview 'markdown-ts-appear-math--source))
-        (staging (generate-new-buffer " *markdown-ts-appear-math*")))
-    (overlay-put preview 'markdown-ts-appear-math--buffer staging)
-    ;; MathJax deletes existing `mathjax' overlays before calling :after.
-    ;; Isolate that operation, then copy valid results to our anchored preview.
-    (with-current-buffer staging
-      (insert source)
-      (condition-case err
-          (mathjax-display
-           (point-min) (point-max) math :options (list :display display-p)
-           :after
-           (lambda (overlay)
-             (unwind-protect
-                 (when (eq (overlay-buffer preview) target)
-                   (with-current-buffer target
-                     (without-restriction
-                       (let ((beg (overlay-start preview))
-                             (end (overlay-end preview)))
-                         (treesit-update-ranges beg end)
-                         (let ((node (markdown-ts-appear--node-ancestor
-                                      (treesit-node-at beg 'markdown-inline)
-                                      "latex_block")))
-                           (if (and markdown-ts-appear-enable-math-preview
-                                    (markdown-ts-appear--active-p)
-                                    node (= beg (treesit-node-start node))
-                                    (= end (treesit-node-end node))
-                                    (not (markdown-ts-appear--literal-block-at beg))
-                                    (equal source (buffer-substring-no-properties beg end)))
-                               (progn
-                                 (overlay-put preview 'markdown-ts-appear-math--image
-                                              (overlay-get overlay 'display))
-                                 (overlay-put preview 'mathjax-error
-                                              (overlay-get overlay 'mathjax-error))
-                                 (setq markdown-ts-appear-math--view nil)
-                                 (markdown-ts-appear-math--display preview))
-                             (markdown-ts-appear-math--delete preview)))))))
-               (overlay-put preview 'markdown-ts-appear-math--buffer nil)
-               (delete-overlay overlay)
-               (when (buffer-live-p staging) (kill-buffer staging)))))
-        (error
-         (overlay-put preview 'markdown-ts-appear-math--buffer nil)
-         (kill-buffer staging)
-         (message "Markdown MathJax preview failed: %s" (error-message-string err)))))))
-
-(defun markdown-ts-appear-math--scan ()
-  "Reconcile formula overlays with the current text, without rendering."
-  (treesit-update-ranges (point-min) (point-max))
-  (with-memoization markdown-ts-appear-math--query
-    (treesit-query-compile 'markdown-inline '((latex_block) @math)))
-  (let ((existing (make-hash-table :test #'eql))
-        (current (make-hash-table :test #'eq)))
-    (dolist (preview markdown-ts-appear-math--objects)
-      (when (eq (overlay-buffer preview) (current-buffer))
-        (puthash (overlay-start preview) preview existing)))
-    (dolist (parser (treesit-parser-list nil 'markdown-inline t))
-      (dolist (node (treesit-query-capture
-                     (treesit-parser-root-node parser)
-                     markdown-ts-appear-math--query nil nil t))
-        (let* ((beg (treesit-node-start node))
-               (end (treesit-node-end node))
-               (opening (treesit-node-child node 0))
-               (closing (treesit-node-child node -1)))
-          (when (and (markdown-ts--latex-block-valid-p node)
-                     (equal (treesit-node-type opening) "latex_span_delimiter")
-                     (equal (treesit-node-type closing) "latex_span_delimiter")
-                     (< (treesit-node-start opening) (treesit-node-start closing)))
-            (let* ((source (treesit-node-text node t))
-                   (display-p (and (member (treesit-node-text opening t)
-                                           '("$$" "\\[")) t))
-                   (candidate (gethash beg existing))
-                   (preview
-                    (and candidate (= end (overlay-end candidate))
-                         (equal source (overlay-get
-                                        candidate 'markdown-ts-appear-math--source))
-                         candidate)))
-              (unless preview
-                (setq preview (make-overlay beg end nil t nil))
-                (overlay-put preview 'category 'mathjax)
-                (overlay-put preview 'evaporate t)
-                (overlay-put preview 'markdown-ts-appear-math--source source)
-                (overlay-put preview 'markdown-ts-appear-math--input
-                             (list (buffer-substring-no-properties
-                                    (treesit-node-end opening) (treesit-node-start closing))
-                                   display-p))
-                (push preview markdown-ts-appear-math--objects)
-                (puthash beg preview existing))
-              (overlay-put preview 'markdown-ts-appear-math--standalone
-                           (and display-p (markdown-ts-appear-math--standalone-p beg end)))
-              (puthash preview t current))))))
-    (dolist (preview markdown-ts-appear-math--objects)
-      (unless (gethash preview current)
-        (markdown-ts-appear-math--delete preview)))))
-
-(defun markdown-ts-appear-math--refresh (&optional force)
-  "Update formulas after text edits, and visibility after cursor movement.
-FORCE rechecks all preview visibility, for example after outline folding."
-  (if (not (and markdown-ts-appear-enable-math-preview
-                (markdown-ts-appear--active-p)))
-      (markdown-ts-appear-math--clear)
-    (without-restriction
-      (let* ((tick (buffer-chars-modified-tick))
-             (changed (not (equal tick markdown-ts-appear-math--scan-tick)))
-             (region markdown-ts-appear--region)
-             (view (list (and (memq #'markdown-ts-appear--update post-command-hook)
-                              (point))
-                         (and region (marker-position (car region)))
-                         (and region (marker-position (cdr region))))))
-        (when changed
-          (markdown-ts-appear-math--scan)
-          (setq markdown-ts-appear-math--scan-tick tick))
-        (when (or force changed (not (equal view markdown-ts-appear-math--view)))
-          (let ((previews
-                 (if (or force changed (null markdown-ts-appear-math--view))
-                     markdown-ts-appear-math--objects
-                   (let (nearby)
-                     (dolist (state (list markdown-ts-appear-math--view view))
-                       (when (car state)
-                         (setq nearby (append (overlays-at (car state)) nearby)))
-                       (when (and (nth 1 state) (nth 2 state))
-                         (setq nearby (append (overlays-in (nth 1 state) (nth 2 state))
-                                              nearby))))
-                     (seq-filter
-                      (lambda (preview)
-                        (overlay-get preview 'markdown-ts-appear-math--source))
-                      (seq-uniq nearby #'eq))))))
-            ;; Callbacks may invalidate this view; commit it before rendering.
-            (setq markdown-ts-appear-math--view view)
-            (dolist (preview previews)
-              (when (overlay-buffer preview)
-                (markdown-ts-appear-math--display preview)
-                (when-let* ((input (overlay-get preview 'markdown-ts-appear-math--input))
-                            ((markdown-ts-appear-math--eligible-p
-                              (overlay-start preview) (overlay-end preview))))
-                  (overlay-put preview 'markdown-ts-appear-math--input nil)
-                  (apply #'markdown-ts-appear-math--request preview input))))))))))
-
-(defun markdown-ts-appear-math--outline-change ()
-  "Refresh folded previews without rescanning unchanged text."
-  (markdown-ts-appear-math--refresh t))
+(defun markdown-ts-appear-math--sync ()
+  "Coordinate source reveal when the external math mode is toggled."
+  (if (and (markdown-ts-appear--active-p)
+           (bound-and-true-p latex-to-svg-frontend-mode))
+      (unless markdown-ts-appear-math--saved-reveal
+        (unless (fboundp 'latex-to-svg-frontend-span-at)
+          (user-error "Update latex-to-svg: this integration requires its span/reveal APIs"))
+        (setq markdown-ts-appear-math--saved-reveal
+              (list (local-variable-p 'latex-to-svg-frontend-reveal)
+                    latex-to-svg-frontend-reveal))
+        (setq-local latex-to-svg-frontend-reveal
+                    #'markdown-ts-appear-math--reveal-p))
+    (markdown-ts-appear-math--restore-reveal)
+    (setq markdown-ts-appear-math--owned nil))
+  ;; The cursor need not have moved when responsibility changes.
+  (setq markdown-ts-appear--last-point nil)
+  (when (memq #'markdown-ts-appear--update post-command-hook)
+    (markdown-ts-appear--update)))
 
 (defun markdown-ts-appear-math--setup ()
-  "Install math preview hooks and render eligible formulas."
-  (unless (and (require 'mathjax nil t) (fboundp 'mathjax-display)
-               (fboundp 'mathjax-available-p))
-    (user-error "Install the optional mathjax package with M-x package-install to enable math previews"))
-  (unless (mathjax-available-p)
-    (user-error "MathJax previews require Node.js; ensure node is on exec-path"))
-  (unless (image-type-available-p 'svg)
-    (user-error "MathJax previews require an Emacs build with SVG support"))
-  (add-hook 'post-command-hook #'markdown-ts-appear-math--refresh 90 t)
-  (markdown-ts-appear--add-outline-hook #'markdown-ts-appear-math--outline-change)
-  (add-hook 'before-change-functions #'markdown-ts-appear-math--clear nil t)
-  (markdown-ts-appear-math--refresh))
+  "Attach the math reveal policy and optionally enable latex-to-svg."
+  (add-hook 'latex-to-svg-frontend-mode-hook #'markdown-ts-appear-math--sync nil t)
+  (when markdown-ts-appear-enable-math-preview
+    (unless (require 'latex-to-svg-for-markdown nil t)
+      (user-error "Install the optional latex-to-svg-for-markdown package to enable math previews"))
+    (unless (fboundp 'latex-to-svg-frontend-span-at)
+      (user-error "Update latex-to-svg: this integration requires its span/reveal APIs"))
+    (unless (bound-and-true-p latex-to-svg-frontend-mode)
+      (latex-to-svg-for-markdown-mode 1)
+      (setq markdown-ts-appear-math--owned t)))
+  (markdown-ts-appear-math--sync))
 
 (defun markdown-ts-appear-math--teardown ()
-  "Remove math preview hooks and dispose of pending and displayed results."
-  (remove-hook 'post-command-hook #'markdown-ts-appear-math--refresh t)
-  (markdown-ts-appear--remove-outline-hook #'markdown-ts-appear-math--outline-change)
-  (remove-hook 'before-change-functions #'markdown-ts-appear-math--clear t)
-  (markdown-ts-appear-math--clear))
+  "Detach math integration, stopping only an adaptor enabled by appear."
+  (remove-hook 'latex-to-svg-frontend-mode-hook #'markdown-ts-appear-math--sync t)
+  (when markdown-ts-appear-math--owned
+    (setq markdown-ts-appear-math--owned nil)
+    (latex-to-svg-for-markdown-mode -1))
+  (markdown-ts-appear-math--restore-reveal))
+
+(defun markdown-ts-appear-math--detach ()
+  "Detach inherited math state in an unsupported indirect clone."
+  ;; The frontend currently has no indirect-clone detach API.  Its teardown
+  ;; releases these shared objects, so first drop only the clone's references.
+  (when (bound-and-true-p latex-to-svg-frontend-mode)
+    (setq-local latex-to-svg-frontend--last-point nil
+                latex-to-svg-frontend--reconcile-timer nil
+                latex-to-svg-frontend--initial-render-timer nil)
+    (remove-hook 'latex-to-svg-frontend-mode-hook #'markdown-ts-appear-math--sync t)
+    (latex-to-svg-for-markdown-mode -1))
+  (setq markdown-ts-appear-math--owned nil)
+  (markdown-ts-appear-math--teardown))
 
 (provide 'markdown-ts-appear-math)
 ;;; markdown-ts-appear-math.el ends here

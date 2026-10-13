@@ -51,9 +51,10 @@
   :group 'markdown-ts)
 
 (defcustom markdown-ts-appear-enable-math-preview nil
-  "Whether to preview unedited formulas with the optional MathJax package.
-Install `mathjax' separately; previews also require Node.js and SVG support.
-The backend is loaded only when this option is enabled for appear mode.
+  "Whether to enable the optional latex-to-svg Markdown adaptor.
+Install `latex-to-svg-for-markdown' separately, with its span/reveal APIs.
+Previews require SVG support and the runtime of the selected math engine.
+An independently enabled adaptor also follows appear's reveal policy.
 Re-enable `markdown-ts-appear-mode' after changing this option."
   :type 'boolean)
 
@@ -265,8 +266,10 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
 
 (defun markdown-ts-appear--node-visible-p (node)
   "Return non-nil when NODE overlaps visible semantic Markdown source."
-  (markdown-ts-appear--region-visible-p
-   (treesit-node-start node) (treesit-node-end node)))
+  (let ((beg (treesit-node-start node))
+        (end (treesit-node-end node)))
+    (or (markdown-ts-appear--region-visible-p beg end)
+        (markdown-ts-appear-math--contains-p beg end))))
 
 (defun markdown-ts-appear--literal-block-at (position)
   "Return the literal Markdown block containing POSITION, if any."
@@ -532,12 +535,13 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
 (defun markdown-ts-appear--bounds ()
   "Return source bounds for the smallest rendered element at point."
   (let ((pos (point)))
-    (or (markdown-ts-appear--fence-bounds-at pos)
-        (markdown-ts-appear--callout-bounds-at pos)
-        (markdown-ts-appear--quote-marker-bounds-at pos)
-        (unless (markdown-ts-appear--literal-block-at pos)
-          (or (markdown-ts-appear--image-preview-bounds-at pos)
-              (markdown-ts-appear--bounds-at-point pos))))))
+    (unless (markdown-ts-appear-math--span-at pos)
+      (or (markdown-ts-appear--fence-bounds-at pos)
+          (markdown-ts-appear--callout-bounds-at pos)
+          (markdown-ts-appear--quote-marker-bounds-at pos)
+          (unless (markdown-ts-appear--literal-block-at pos)
+            (or (markdown-ts-appear--image-preview-bounds-at pos)
+                (markdown-ts-appear--bounds-at-point pos)))))))
 
 (defun markdown-ts-appear--update-inline-ranges ()
   "Update inline Tree-sitter ranges around point when needed."
@@ -1014,7 +1018,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
            (beg (treesit-node-start node))
            (end (treesit-node-end node)))
       (cond
-       ((markdown-ts-appear--callout-link-p parent)
+       ((or (markdown-ts-appear--callout-link-p parent)
+            (markdown-ts-appear-math--contains-p parent-beg parent-end))
         (with-silent-modifications
           (remove-list-of-text-properties
            parent-beg parent-end
@@ -1219,8 +1224,7 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (markdown-ts-appear-image--detach)
     (markdown-ts-appear-mermaid--detach)
     (markdown-ts-appear-table--detach)
-    (setq markdown-ts-appear-math--objects nil)
-    (markdown-ts-appear-math--teardown)
+    (markdown-ts-appear-math--detach)
     (setq local-minor-modes
           (remove 'markdown-ts-appear-mode local-minor-modes))
     (remove-hook 'post-command-hook #'markdown-ts-appear--update t)
@@ -1255,8 +1259,7 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (font-lock-flush (point-min) (point-max)))
   (markdown-ts-appear-start)
   (markdown-ts-appear-table--setup)
-  (when markdown-ts-appear-enable-math-preview
-    (markdown-ts-appear-math--setup))
+  (markdown-ts-appear-math--setup)
   (when markdown-ts-appear-enable-mermaid-preview
     (markdown-ts-appear-mermaid--setup)))
 

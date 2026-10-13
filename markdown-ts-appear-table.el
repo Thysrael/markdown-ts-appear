@@ -31,6 +31,8 @@
 
 ;;; Code:
 
+(declare-function markdown-ts-appear-math--revealed-region "markdown-ts-appear-math")
+
 (require 'cl-lib)
 (require 'hl-line)
 (require 'markdown-ts-mode)
@@ -460,10 +462,11 @@ DISPLAY-P non-nil restores their rendered display."
 
 (defun markdown-ts-appear-table--visible-region ()
   "Return numeric bounds of source currently revealed by the main mode."
-  (when-let* ((region markdown-ts-appear--region)
-              (beg (marker-position (car region)))
-              (end (marker-position (cdr region))))
-    (cons beg end)))
+  (or (when-let* ((region markdown-ts-appear--region)
+                  (beg (marker-position (car region)))
+                  (end (marker-position (cdr region))))
+        (cons beg end))
+      (markdown-ts-appear-math--revealed-region)))
 
 (defun markdown-ts-appear-table--build-layout (layout beg end)
   "Build LAYOUT's source map and visual lines for BEG..END in one glyph pass.

@@ -21,15 +21,20 @@ rendered appearance when point leaves.  This minor mode extends the built-in
 `markdown-ts-mode` without changing buffer text.
 
 Optional features include link icons, code fences, quote markers, callout
-labels, width-aware table views, and MathJax and Mermaid previews.
+labels, width-aware table views, and LaTeX and Mermaid previews.
+
+> Experimental branch: math previews are delegated entirely to
+> `latex-to-svg`. See [the integration notes](docs/latex-to-svg-experiment.md)
+> for the tested revisions, known upstream issues and performance results.
 
 ## Requirements
 
 - Emacs 31.1+ with Tree-sitter support.
 - The `markdown` and `markdown-inline` grammars.
 - `markdown-table-wrap` 0.2.0+.
-- For math previews: the `mathjax` package, Node.js, and an Emacs build with SVG
-  image support.
+- For math previews: `latex-to-svg-for-markdown` with the span/reveal APIs
+  added after v0.21.0, SVG image support, and the selected engine's runtime:
+  `latex` + `dvisvgm` (default), RaTeX's `render-svg`, or texres + `pdftocairo`.
 - For Mermaid previews: [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)
   (`mmdc`) with its browser runtime, and SVG image support.
 
@@ -56,21 +61,29 @@ Or install the latest Git revision:
   :hook (markdown-ts-mode . markdown-ts-appear-mode))
 ```
 
-MathJax is optional and is not installed as a dependency.  To opt in, install
-`mathjax` explicitly and enable previews:
+The math adaptor is optional and is not installed as a dependency. To opt in,
+install the current MELPA/Git version of `latex-to-svg-for-markdown` and enable:
 
 ```emacs-lisp
-(use-package mathjax
+(use-package latex-to-svg-for-markdown
   :ensure t
   :defer t
   :custom
-  (markdown-ts-appear-enable-math-preview t))
+  (markdown-ts-appear-enable-math-preview t)
+  (latex-to-svg-frontend-center-display-math t))
 ```
 
-Install Node.js separately and use an Emacs build with SVG support.  Installing
-`mathjax` does not install Node.js.  Math previews are disabled by default;
-the backend is loaded when previews are enabled, and rendering is requested
-only for eligible formulas.
+Install the engine runtime separately; see the
+[upstream instructions](https://github.com/alberti42/latex-to-svg#engine).
+For RaTeX, set `latex-to-svg-frontend-engine` to `ratex`. Its optional LaTeX
+fallback still requires `latex` + `dvisvgm`; disable
+`latex-to-svg-frontend-fallback` if you want RaTeX alone.
+
+Math previews are disabled by default. Appear enables and disables the adaptor
+with its own mode when the preview option is on. If you enable the adaptor
+independently, appear coordinates its reveal policy and leaves it running when
+appear is disabled. The previous buffer-local reveal setting is restored.
+The Evil/Meow configurations below also control math source reveal.
 
 For Mermaid diagrams, install the CLI separately with
 `npm install -g @mermaid-js/mermaid-cli`, then enable:
@@ -165,8 +178,10 @@ to each buffer and are removed when appear mode is disabled.
 - Enabling appear mode turns on `markdown-ts-hide-markup`.  Disabling it
   removes the buffer-local override and uses the current default value.
 - Indirect buffers are unsupported; clones are detached from active tracking.
-- Unchanged formulas reuse their previews.  Standalone display math is centered;
-  inline math stays in the text.
+- Math detection, overlays, numbering, references and render caching belong to
+  `latex-to-svg`. Its options control engines, preambles, scaling and centering.
+  Besides `$...$` and `$$...$$`, it detects `\(...\)`, `\[...\]` and math
+  environments. Source reveal includes the position after a closing delimiter.
 - Mermaid renders visible, unedited blocks asynchronously, one job at a time.
   Identical diagrams share cached images; failed diagrams keep their source,
   with details available on hover.  Diagrams are only scaled down, preserving
@@ -191,8 +206,8 @@ emacs --batch -Q \
   -f ert-run-tests-batch-and-exit
 ```
 
-Add `MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1` to require the optional math
-dependencies and real SVG rendering tests, or
+Add `MARKDOWN_TS_APPEAR_REQUIRE_LATEX_TO_SVG=1` to require the optional math
+packages. The real-engine math test runs in a graphical Emacs session. Use
 `MARKDOWN_TS_APPEAR_REQUIRE_MERMAID=1` to require the Mermaid CLI tests.
 Without the corresponding
 environment variable, tests with unavailable dependencies are skipped.

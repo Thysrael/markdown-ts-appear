@@ -12,8 +12,10 @@ permissions:
 
 jobs:
   test:
-    name: Emacs ${{ matrix.emacs-version }} / grammar ${{ matrix.grammar-version }} / MathJax ${{ matrix.mathjax }}
-    runs-on: ${{ matrix.mathjax && 'macos-15' || 'ubuntu-latest' }}
+    name: Emacs ${{ matrix.emacs-version }} / grammar ${{ matrix.grammar-version }} / SVG ${{ matrix.svg }}
+    runs-on: ${{ matrix.svg && 'macos-15' || 'ubuntu-latest' }}
+    env:
+      EMACSLOADPATH: "${{ github.workspace }}/.test-deps/latex-to-svg:${{ github.workspace }}/.test-deps/latex-to-svg-backend:"
     strategy:
       fail-fast: false
       matrix:
@@ -21,31 +23,43 @@ jobs:
           - emacs-version: "31.1"
             grammar-version: pinned
             grammar-commit: "413285231ce8fa8b11e7074bbe265b48aa7277f9"
-            mathjax: true
+            svg: true
           - emacs-version: "31.1"
             grammar-version: latest
             grammar-commit: ""
-            mathjax: false
+            svg: false
           - emacs-version: snapshot
             grammar-version: pinned
             grammar-commit: "413285231ce8fa8b11e7074bbe265b48aa7277f9"
-            mathjax: false
+            svg: false
           - emacs-version: snapshot
             grammar-version: latest
             grammar-commit: ""
-            mathjax: false
+            svg: false
 
     steps:
       - uses: actions/checkout@v5
 
+      - uses: actions/checkout@v5
+        with:
+          repository: alberti42/latex-to-svg
+          ref: b9cf5af2471f06e24fb14ca2fefc41fb3a404b5d
+          path: .test-deps/latex-to-svg
+
+      - uses: actions/checkout@v5
+        with:
+          repository: alberti42/latex-to-svg-backend
+          ref: a5c886daff1c16686038e2915b472022138e73d6
+          path: .test-deps/latex-to-svg-backend
+
       - uses: purcell/setup-emacs@master
-        if: ${{ !matrix.mathjax }}
+        if: ${{ !matrix.svg }}
         with:
           version: ${{ matrix.emacs-version }}
 
       # purcell's minimal builds have no image support; previews need real SVG.
       - name: Install SVG-capable Emacs
-        if: matrix.mathjax
+        if: matrix.svg
         working-directory: ${{ runner.temp }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -99,27 +113,12 @@ jobs:
             (package-install 'evil))"
 
       - uses: actions/setup-node@v5
-        if: matrix.mathjax
+        if: matrix.svg
         with:
           node-version: "24"
 
-      - name: Install optional MathJax dependency
-        if: matrix.mathjax
-        run: |
-          emacs --batch -Q --eval "(progn
-            (require 'package)
-            (add-to-list 'package-archives
-                         '(\"melpa\" . \"https://melpa.org/packages/\") t)
-            (package-refresh-contents)
-            (package-install 'mathjax)
-            (unless (image-type-available-p 'svg)
-              (error \"This Emacs build lacks SVG image support\"))
-            (unless (and (require 'mathjax nil t)
-                         (mathjax-available-p))
-              (error \"MathJax or Node.js is unavailable\")))"
-
       - name: Install optional Mermaid CLI
-        if: matrix.mathjax
+        if: matrix.svg
         run: |
           npm install --prefix "$RUNNER_TEMP/mermaid" @mermaid-js/mermaid-cli@12.0.0
           echo "$RUNNER_TEMP/mermaid/node_modules/.bin" >> "$GITHUB_PATH"
@@ -159,8 +158,8 @@ jobs:
       - name: Run tests
         env:
           MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS: "1"
-          MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX: ${{ matrix.mathjax }}
-          MARKDOWN_TS_APPEAR_REQUIRE_MERMAID: ${{ matrix.mathjax }}
+          MARKDOWN_TS_APPEAR_REQUIRE_LATEX_TO_SVG: "1"
+          MARKDOWN_TS_APPEAR_REQUIRE_MERMAID: ${{ matrix.svg }}
         run: |
           emacs --batch -Q \
             --eval '(progn (require (quote package)) (package-initialize))' \

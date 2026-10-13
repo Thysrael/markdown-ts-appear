@@ -53,7 +53,7 @@ Setext Heading
 | Link    | Inline        | Ready  |
 | Formula | Display       | Ready  |
 
-### MathJax preview
+### Math preview (latex-to-svg)
 
 Inline math: $e^{i\pi} + 1 = 0$ and $a^2 + b^2 = c^2$.
 
@@ -64,6 +64,14 @@ $$
 $$
 \mathbf{F}(\omega) = \int_{-\infty}^{\infty} f(t)e^{-i\omega t}\,dt
 $$
+
+The external adaptor also recognizes \(x+y\) and numbered environments:
+
+\begin{equation}
+E = mc^2 \label{eq:energy}
+\end{equation}
+
+Reference: \eqref{eq:energy}.
 
 ---
 
