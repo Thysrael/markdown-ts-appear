@@ -21,14 +21,14 @@ rendered appearance when point leaves.  This minor mode extends the built-in
 `markdown-ts-mode` without changing buffer text.
 
 Optional features include link icons, code fences, quote markers, callout
-labels, width-aware table views, and MathJax and Mermaid previews.
+labels, width-aware table views, and LaTeX and Mermaid previews.
 
 ## Requirements
 
 - Emacs 31.1+ with Tree-sitter support.
 - The `markdown` and `markdown-inline` grammars.
-- Math (optional): the `mathjax` package, Node.js, and an Emacs build with SVG
-  image support.
+- Math (optional): `latex-to-svg-for-markdown` from MELPA, SVG support, and a
+  [supported rendering engine](https://github.com/alberti42/latex-to-svg#engine).
 - Mermaid (optional): [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)
   (`mmdc`) with its browser runtime, and SVG image support.
 
@@ -60,18 +60,20 @@ with SVG image support.
 
 ### Math
 
-Install MathJax from MELPA and enable previews:
+Install the Markdown adaptor from MELPA, then enable previews:
 
 ```emacs-lisp
-(use-package mathjax
+(use-package latex-to-svg-for-markdown
   :ensure t
   :defer t
   :custom
-  (markdown-ts-appear-enable-math-preview t))
+  (markdown-ts-appear-enable-math-preview t)
+  (latex-to-svg-frontend-center-display-math t))
 ```
 
-Install [Node.js](https://nodejs.org/) separately; the Emacs package does not
-install its runtime.
+Install the selected engine separately: LaTeX + dvisvgm (default), RaTeX, or
+texres + pdftocairo. See [upstream setup](https://github.com/alberti42/latex-to-svg#engine).
+MELPA Stable's v0.21.0 lacks the required integration APIs.
 
 ### Mermaid
 
@@ -104,7 +106,8 @@ faces.  See `C-h v` and `M-x describe-face` for full documentation.
 | `markdown-ts-appear-table-style` | `wrapped` | `raw`, `unicode`, or width-aware `wrapped` tables. |
 | `markdown-ts-appear-table-zebra-stripe` | `t` | Shade every second data row in `wrapped` tables. |
 | `markdown-ts-appear-table-wrap-resize-delay` | `0.2` | Seconds to debounce `wrapped` table resize rendering. |
-| `markdown-ts-appear-enable-math-preview` | `nil` | `t` enables asynchronous math previews. |
+| `markdown-ts-appear-enable-math-preview` | `nil` | `t` enables latex-to-svg math previews. |
+| `latex-to-svg-frontend-engine` | `latex` | Upstream engine choice: `latex`, `ratex`, or `texres`. |
 | `markdown-ts-appear-enable-mermaid-preview` | `nil` | `t` previews unedited `mermaid` fenced blocks. |
 | `markdown-ts-appear-mermaid-command` | `"mmdc"` | Mermaid CLI executable. |
 | `markdown-ts-appear-mermaid-size` | `source` | `source`: fit source height; positive integer: limit only width, in pixels. |
@@ -173,8 +176,9 @@ to each buffer and are removed when appear mode is disabled.
 - Indirect buffers are unsupported; clones are detached from active tracking.
 - Wrapped-table navigation skips hidden source characters. Revealing the row
   restores access to all of its source.
-- Unchanged formulas reuse their previews.  Standalone display math is centered;
-  inline math stays in the text.
+- Math detection, rendering, numbering, references and caching belong to
+  `latex-to-svg`. Appear coordinates source reveal and restores the previous
+  reveal setting on disable; independently enabled adaptors stay running.
 - Mermaid renders visible, unedited blocks asynchronously, one job at a time.
   Identical diagrams share cached images; failed diagrams keep their source,
   with details available on hover.  Diagrams are only scaled down, preserving
@@ -192,8 +196,8 @@ emacs --batch -Q \
   -l test/run-tests.el
 ```
 
-Add `MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX=1` to require the optional math
-dependencies and real SVG rendering tests, or
+Add `MARKDOWN_TS_APPEAR_REQUIRE_LATEX_TO_SVG=1` to require the optional math
+packages. The real math rendering test needs a graphical Emacs session. Use
 `MARKDOWN_TS_APPEAR_REQUIRE_MERMAID=1` to require the Mermaid CLI tests.
 Without the corresponding
 environment variable, tests with unavailable dependencies are skipped.

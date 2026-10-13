@@ -52,9 +52,10 @@
   :group 'markdown-ts)
 
 (defcustom markdown-ts-appear-enable-math-preview nil
-  "Whether to preview unedited formulas with the optional MathJax package.
-Install `mathjax' separately; previews also require Node.js and SVG support.
-The backend is loaded only when this option is enabled for appear mode.
+  "Whether to enable the optional latex-to-svg Markdown adaptor.
+Install `latex-to-svg-for-markdown' with its span/reveal APIs.
+Its options select the engine, preamble and preview appearance.
+An independently enabled adaptor also follows appear's reveal policy.
 Re-enable `markdown-ts-appear-mode' after changing this option."
   :type 'boolean)
 
@@ -273,8 +274,9 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
 
 (defun markdown-ts-appear--node-visible-p (node)
   "Return non-nil when NODE overlaps visible semantic Markdown source."
-  (markdown-ts-appear--region-visible-p
-   (treesit-node-start node) (treesit-node-end node)))
+  (let ((beg (treesit-node-start node)) (end (treesit-node-end node)))
+    (or (markdown-ts-appear--region-visible-p beg end)
+        (markdown-ts-appear-math--contains-p beg end))))
 
 (defun markdown-ts-appear--literal-block-at (position &optional node)
   "Return the literal Markdown block containing POSITION, if any.
@@ -547,12 +549,13 @@ BLOCK is the Markdown node already found at POS, when available."
   "Return source bounds for the smallest rendered element at point."
   (let* ((pos (point))
          (node (markdown-ts-appear--markdown-node-at pos)))
-    (or (markdown-ts-appear--fence-bounds-at pos node)
-        (markdown-ts-appear--callout-bounds-at pos node)
-        (markdown-ts-appear--quote-marker-bounds-at pos node)
-        (unless (markdown-ts-appear--literal-block-at pos node)
-          (or (markdown-ts-appear--image-preview-bounds-at pos)
-              (markdown-ts-appear--bounds-at-point pos node))))))
+    (unless (markdown-ts-appear-math--span-at pos)
+      (or (markdown-ts-appear--fence-bounds-at pos node)
+          (markdown-ts-appear--callout-bounds-at pos node)
+          (markdown-ts-appear--quote-marker-bounds-at pos node)
+          (unless (markdown-ts-appear--literal-block-at pos node)
+            (or (markdown-ts-appear--image-preview-bounds-at pos)
+                (markdown-ts-appear--bounds-at-point pos node)))))))
 
 (defun markdown-ts-appear--update-inline-ranges ()
   "Update inline Tree-sitter ranges around point when needed."
@@ -1028,7 +1031,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
            (beg (treesit-node-start node))
            (end (treesit-node-end node)))
       (cond
-       ((markdown-ts-appear--callout-link-p parent)
+       ((or (markdown-ts-appear--callout-link-p parent)
+            (markdown-ts-appear-math--contains-p parent-beg parent-end))
         (with-silent-modifications
           (remove-list-of-text-properties
            parent-beg parent-end
@@ -1125,9 +1129,14 @@ at most one following space or tab and are not clipped to START or LIMIT."
           (when (eq option 'markdown-ts-appear-table-style)
             (markdown-ts-appear-table--setup))))))))
 
-(defun markdown-ts-appear--theme-change (_theme)
-  "Refresh callout backgrounds and diagram previews after a theme change."
+(defconst markdown-ts-appear--appearance-hooks
+  '(enable-theme-functions disable-theme-functions after-setting-font-hook)
+  "Global appearance notifications used while appear is active.")
+
+(defun markdown-ts-appear--appearance-change (&rest _)
+  "Refresh decorations and previews after a theme or frame-font change."
   (setq markdown-ts-appear--callout-backgrounds nil)
+  (markdown-ts-appear-math--appearance-change)
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (markdown-ts-appear--active-p)
@@ -1236,8 +1245,7 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (markdown-ts-appear-image--detach)
     (markdown-ts-appear-mermaid--detach)
     (markdown-ts-appear-table--detach)
-    (setq markdown-ts-appear-math--objects nil)
-    (markdown-ts-appear-math--teardown)
+    (markdown-ts-appear-math--detach)
     (setq local-minor-modes
           (remove 'markdown-ts-appear-mode local-minor-modes))
     (remove-hook 'post-command-hook #'markdown-ts-appear--update t)
@@ -1261,8 +1269,8 @@ Indirect buffers are otherwise unsupported and are not synchronized."
 (defun markdown-ts-appear--enable-buffer ()
   "Install Markdown TS Appear integration in the current buffer."
   (markdown-ts-appear--install-advice)
-  (add-hook 'enable-theme-functions #'markdown-ts-appear--theme-change)
-  (add-hook 'disable-theme-functions #'markdown-ts-appear--theme-change)
+  (dolist (hook markdown-ts-appear--appearance-hooks)
+    (add-hook hook #'markdown-ts-appear--appearance-change))
   (markdown-ts-appear--install-buffer-hooks)
   (markdown-ts-appear--install-block-font-lock)
   (markdown-ts-appear-image--setup)
@@ -1273,8 +1281,7 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (font-lock-flush (point-min) (point-max)))
   (markdown-ts-appear-start)
   (markdown-ts-appear-table--setup)
-  (when markdown-ts-appear-enable-math-preview
-    (markdown-ts-appear-math--setup))
+  (markdown-ts-appear-math--setup)
   (when markdown-ts-appear-enable-mermaid-preview
     (markdown-ts-appear-mermaid--setup)))
 
@@ -1301,8 +1308,8 @@ Indirect buffers are otherwise unsupported and are not synchronized."
                      (with-current-buffer buffer (markdown-ts-appear--active-p)))
                    (buffer-list))
     (markdown-ts-appear--set-advice nil)
-    (remove-hook 'enable-theme-functions #'markdown-ts-appear--theme-change)
-    (remove-hook 'disable-theme-functions #'markdown-ts-appear--theme-change)))
+    (dolist (hook markdown-ts-appear--appearance-hooks)
+      (remove-hook hook #'markdown-ts-appear--appearance-change))))
 
 ;;;###autoload
 (define-minor-mode markdown-ts-appear-mode
@@ -1326,8 +1333,8 @@ Disabling the mode resets `markdown-ts-hide-markup' to its current default."
 
 (defun markdown-ts-appear-unload-function ()
   "Remove global integration before unloading Markdown TS Appear."
-  (remove-hook 'enable-theme-functions #'markdown-ts-appear--theme-change)
-  (remove-hook 'disable-theme-functions #'markdown-ts-appear--theme-change)
+  (dolist (hook markdown-ts-appear--appearance-hooks)
+    (remove-hook hook #'markdown-ts-appear--appearance-change))
   (dolist (buffer (buffer-list))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer

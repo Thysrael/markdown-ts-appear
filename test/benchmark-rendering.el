@@ -6,8 +6,7 @@
 ;;; Commentary:
 ;; Initialize package.el, then select the checkout with -L as in
 ;; benchmark-table.el. Use equally byte-compiled checkouts for comparisons.
-;; Timings include garbage collection. The math case isolates overlay cleanup;
-;; it does not invoke MathJax. The image case uses the bundled local SVG.
+;; Timings include garbage collection. The image case uses the bundled local SVG.
 ;; Diagram discovery requires mmdc and SVG support but does not run the CLI.
 
 ;;; Code:
@@ -38,20 +37,6 @@
             (markdown-ts-appear--update)))
         (princ (format "node-lookups/100-commands=%d\n" calls)))
     (markdown-ts-appear-mode -1)))
-
-(dolist (n '(10 100))
-  (with-temp-buffer
-    (insert (make-string (+ 10 (* 4 n)) ?x))
-    (dotimes (i n)
-      (let ((ov (make-overlay (+ 2 (* 4 i)) (+ 5 (* 4 i)))))
-        (overlay-put ov 'markdown-ts-appear-math--source "$x$")
-        (push ov markdown-ts-appear-math--objects)))
-    (garbage-collect)
-    (princ (format "math=%d unrelated-edit/1000=%S\n" n
-                   (benchmark-run 1000
-                     (markdown-ts-appear-math--clear (point-max) (point-max)))))
-    (princ (format "math=%d teardown=%S\n" n
-                   (benchmark-run 1 (markdown-ts-appear-math--clear))))))
 
 (dolist (n '(10 100))
   (with-temp-buffer

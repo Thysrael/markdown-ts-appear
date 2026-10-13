@@ -53,7 +53,7 @@ Setext Heading
 | Link    | Inline        | Ready  |
 | Formula | Display       | Ready  |
 
-### MathJax preview
+### Math preview
 
 Inline math: $e^{i\pi} + 1 = 0$ and $a^2 + b^2 = c^2$.
 
