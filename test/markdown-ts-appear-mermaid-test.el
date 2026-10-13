@@ -281,7 +281,7 @@
                      (funcall original frame parameter)))))
         (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
           (setq theme 'dark)
-          (markdown-ts-appear--theme-change nil)
+          (markdown-ts-appear--appearance-change)
           (markdown-ts-appear-mermaid-test--deliver)
           (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
           (should (equal (cadr (car markdown-ts-appear-diagram--job)) "dark"))
@@ -318,9 +318,9 @@
         (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
           (markdown-ts-appear-mermaid-test--deliver)
           (setq theme 'dark)
-          (markdown-ts-appear--theme-change nil)
+          (markdown-ts-appear--appearance-change)
           (setq theme 'light)
-          (markdown-ts-appear--theme-change nil)
+          (markdown-ts-appear--appearance-change)
           (sit-for 0.05)
           (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
           (should (overlay-get (markdown-ts-appear-mermaid-test--view) 'display)))))))

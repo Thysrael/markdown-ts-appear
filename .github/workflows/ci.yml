@@ -74,27 +74,22 @@ jobs:
                          '(\"melpa\" . \"https://melpa.org/packages/\") t)
             (package-refresh-contents)
             (package-install 'markdown-table-wrap)
-            (package-install 'evil))"
+            (package-install 'evil)
+            (package-install 'latex-to-svg-for-markdown))"
+
+      - uses: r-lib/actions/setup-tinytex@v2
+        if: matrix.svg
+
+      - name: Install LaTeX preview packages
+        if: matrix.svg
+        run: |
+          tlmgr update --self
+          tlmgr install standalone varwidth amsmath amsfonts xcolor dvisvgm
 
       - uses: actions/setup-node@v5
         if: matrix.svg
         with:
           node-version: "lts/*"
-
-      - name: Install optional MathJax dependency
-        if: matrix.svg
-        run: |
-          emacs --batch -Q --eval "(progn
-            (require 'package)
-            (add-to-list 'package-archives
-                         '(\"melpa\" . \"https://melpa.org/packages/\") t)
-            (package-refresh-contents)
-            (package-install 'mathjax)
-            (unless (image-type-available-p 'svg)
-              (error \"This Emacs build lacks SVG image support\"))
-            (unless (and (require 'mathjax nil t)
-                         (mathjax-available-p))
-              (error \"MathJax or Node.js is unavailable\")))"
 
       - name: Install optional Mermaid CLI
         if: matrix.svg
@@ -143,7 +138,7 @@ jobs:
         timeout-minutes: 10
         env:
           MARKDOWN_TS_APPEAR_REQUIRE_GRAMMARS: "1"
-          MARKDOWN_TS_APPEAR_REQUIRE_MATHJAX: ${{ matrix.svg }}
+          MARKDOWN_TS_APPEAR_REQUIRE_LATEX_TO_SVG: "1"
           MARKDOWN_TS_APPEAR_REQUIRE_MERMAID: ${{ matrix.svg }}
         run: |
           emacs --batch -Q -l test/run-tests.el
