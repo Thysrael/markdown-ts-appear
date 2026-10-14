@@ -6,7 +6,7 @@
 ;;; Commentary:
 ;; Exercise the real latex-to-svg frontend with a controlled rendering backend.
 ;; Set MARKDOWN_TS_APPEAR_REQUIRE_LATEX_TO_SVG=1 to require the optional package.
-;; The real-engine test additionally requires a graphical Emacs session.
+;; The real-engine test requires SVG support and a working rendering runtime.
 
 ;;; Code:
 (require 'ert)
@@ -218,30 +218,39 @@
         (should-not markdown-ts-appear-math--owned)))))
 
 (ert-deftest markdown-ts-appear-math-test-real-render ()
-  (skip-unless (display-graphic-p))
+  (skip-unless (image-type-available-p 'svg))
   (let ((latex-to-svg-backend-cache-directory (make-temp-file "appear-math-test-" t))
         (latex-to-svg-backend--image-cache (make-hash-table :test #'equal)))
     (unwind-protect
-        (markdown-ts-appear-math-test--buffer "$x^2+1$\n"
-          (switch-to-buffer (current-buffer))
-          (setq markdown-ts-appear-enable-math-preview t)
-          (markdown-ts-appear-mode 1)
-          ;; Require a real asynchronous compile, not a previous disk/memory hit.
-          (should-not (markdown-ts-appear-math-test--previews))
-          (markdown-ts-appear-math-test--move 2)
-          (font-lock-ensure)
-          (let ((deadline (+ (float-time) 30)))
-            (while (and (not (markdown-ts-appear-math-test--previews))
-                        (< (float-time) deadline))
-              (accept-process-output nil 0.01)))
-          (let* ((preview (car (markdown-ts-appear-math-test--previews)))
-                 (image (overlay-get preview 'latex-to-svg-frontend-image)))
-            (should (eq (car image) 'image))
-            (should (> (car (image-size image t)) 0))
-            (should-not (overlay-get preview 'display))
-            (should-not (get-text-property (point-min) 'invisible))
-            (markdown-ts-appear-math-test--move (point-max))
-            (should (overlay-get preview 'display))))
+        ;; Fix only the display context for batch Emacs.  Compilation, SVG
+        ;; generation and the frontend's asynchronous placement remain real.
+        (cl-letf (((symbol-function 'latex-to-svg-frontend--graphical-p) (lambda () t))
+                  ((symbol-function 'latex-to-svg-frontend--foreground-for)
+                   (lambda (&rest _) "#000000"))
+                  ((symbol-function 'latex-to-svg-frontend--x-height-at)
+                   (lambda (&rest _) 10)))
+          (markdown-ts-appear-math-test--buffer "$x^2+1$\n"
+            (switch-to-buffer (current-buffer))
+            (setq markdown-ts-appear-enable-math-preview t)
+            (markdown-ts-appear-mode 1)
+            (should-not (markdown-ts-appear-math-test--previews))
+            (markdown-ts-appear-math-test--move 2)
+            (font-lock-ensure)
+            (let ((deadline (+ (float-time) 30)))
+              (while (and (not (markdown-ts-appear-math-test--previews))
+                          (< (float-time) deadline))
+                (accept-process-output nil 0.01)))
+            (let* ((preview (car (markdown-ts-appear-math-test--previews)))
+                   (image (overlay-get preview 'latex-to-svg-frontend-image)))
+              (should (eq (car image) 'image))
+              (should (> (latex-to-svg-backend-image-width image) 0))
+              (should (string-match-p "<svg" (image-property image :data)))
+              (when (display-graphic-p)
+                (should (> (car (image-size image t)) 0)))
+              (should-not (overlay-get preview 'display))
+              (should-not (get-text-property (point-min) 'invisible))
+              (markdown-ts-appear-math-test--move (point-max))
+              (should (overlay-get preview 'display)))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest markdown-ts-appear-math-test-no-markdown-link-in-math ()

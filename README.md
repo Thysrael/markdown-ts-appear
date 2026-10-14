@@ -216,13 +216,17 @@ emacs --batch -Q \
 ```
 
 Add `MARKDOWN_TS_APPEAR_REQUIRE_LATEX_TO_SVG=1` to require the optional math
-packages. The real math rendering test needs a graphical Emacs session. Use
+packages. The real math rendering test needs SVG support and LaTeX + dvisvgm. Use
 `MARKDOWN_TS_APPEAR_REQUIRE_MERMAID=1` to require the Mermaid CLI tests.
 Without the corresponding
 environment variable, tests with unavailable dependencies are skipped.
 
 CI uses batch tests and real SVG rendering. Omit `--batch` to include graphical
 interaction tests locally.
+
+`test/latex-to-svg-upstream-test.el` contains separate upstream reproducers,
+including the known failed-edit issue tracked in [#7](https://github.com/Thysrael/markdown-ts-appear/issues/7).
+These diagnostics are not part of the required package CI suite.
 
 Run `python3 test/table-redisplay.py` to check actual terminal cursor positions
 and Evil insert transitions.  This uses a real PTY and the supplied three-column
