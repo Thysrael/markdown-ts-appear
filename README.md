@@ -131,6 +131,9 @@ to each buffer and are removed when appear mode is disabled.
 
 ### Evil
 
+[evil-collection](https://github.com/emacs-evil/evil-collection) includes this
+integration, so no extra configuration is needed if you use it.  Otherwise:
+
 ```emacs-lisp
 (defun my/markdown-appear-evil ()
   "Reveal Markdown source only in Evil insert state."
