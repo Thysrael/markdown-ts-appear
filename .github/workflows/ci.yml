@@ -148,6 +148,15 @@ jobs:
           python3 -B -m unittest discover -s test -p 'test_*.py'
           python3 test/table-redisplay.py
 
+      # Experimental dependency checks may fail on known upstream issues (#7).
+      - name: Check upstream math preview lifecycle
+        run: |
+          emacs --batch -Q \
+            --eval '(progn (require (quote package)) (package-initialize))' \
+            -L . \
+            -l test/latex-to-svg-upstream-test.el \
+            -f ert-run-tests-batch-and-exit
+
   package-lint:
     runs-on: ubuntu-latest
 
