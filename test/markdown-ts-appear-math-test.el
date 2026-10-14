@@ -21,6 +21,8 @@
   (error "Required latex-to-svg-for-markdown package is unavailable"))
 
 (defvar markdown-ts-appear-math-test--calls nil)
+(defvar latex-to-svg-backend-cache-directory)
+(defvar latex-to-svg-backend--image-cache)
 
 (defmacro markdown-ts-appear-math-test--buffer (content &rest body)
   "Run BODY in a fresh Markdown buffer with CONTENT and real frontend hooks."
@@ -72,17 +74,25 @@
   (run-hooks 'post-command-hook))
 
 (ert-deftest markdown-ts-appear-math-test-optional-package ()
-  (markdown-ts-appear-math-test--buffer "$x$\n"
-    (markdown-ts-appear-mode 1)
-    (should-not (bound-and-true-p latex-to-svg-frontend-mode))
-    (markdown-ts-appear-mode -1)
-    (let ((original (symbol-function 'require)))
-      (cl-letf (((symbol-function 'require)
-                 (lambda (feature &optional filename noerror)
-                   (unless (eq feature 'latex-to-svg-for-markdown)
-                     (funcall original feature filename noerror)))))
-        (setq markdown-ts-appear-enable-math-preview t)
-         (should-error (markdown-ts-appear-mode 1) :type 'user-error)))))
+  ;; This test must also run when the optional package is genuinely absent.
+  (skip-unless (treesit-ready-p '(markdown markdown-inline)))
+  (with-temp-buffer
+    (insert "$x$\n")
+    (markdown-ts-mode)
+    (let ((markdown-ts-appear-enable-math-preview nil))
+      (unwind-protect
+          (progn
+            (markdown-ts-appear-mode 1)
+            (should-not (bound-and-true-p latex-to-svg-frontend-mode))
+            (markdown-ts-appear-mode -1)
+            (let ((original (symbol-function 'require)))
+              (cl-letf (((symbol-function 'require)
+                         (lambda (feature &optional filename noerror)
+                           (unless (eq feature 'latex-to-svg-for-markdown)
+                             (funcall original feature filename noerror)))))
+                (setq markdown-ts-appear-enable-math-preview t)
+                (should-error (markdown-ts-appear-mode 1) :type 'user-error))))
+        (markdown-ts-appear-mode -1)))))
 
 (ert-deftest markdown-ts-appear-math-test-owned-lifecycle ()
   (markdown-ts-appear-math-test--buffer "$x$\n"
@@ -185,8 +195,9 @@
         (should-not (markdown-ts-appear--bounds))
         (should-not (text-property-not-all (- (point) (length source)) (point) 'invisible nil))))))
 
-(ert-deftest markdown-ts-appear-math-test-failure-keeps-delimiters ()
-  (markdown-ts-appear-math-test--buffer "$bad$ \\(bad\\)\n"
+(ert-deftest markdown-ts-appear-math-test-pending-render-keeps-delimiters ()
+  (markdown-ts-appear-math-test--buffer "$pending$ \\(pending\\)\n"
+    ;; A nil result is also returned while compilation is still pending.
     (cl-letf (((symbol-function 'latex-to-svg-backend) (lambda (&rest _) nil)))
       (setq markdown-ts-appear-enable-math-preview t)
       (markdown-ts-appear-mode 1)
@@ -208,25 +219,30 @@
 
 (ert-deftest markdown-ts-appear-math-test-real-render ()
   (skip-unless (display-graphic-p))
-  (markdown-ts-appear-math-test--buffer "$x^2+1$\n"
-    (switch-to-buffer (current-buffer))
-    (setq markdown-ts-appear-enable-math-preview t)
-    (markdown-ts-appear-mode 1)
-    ;; Enter the formula before the real compiler finishes its first render.
-    (markdown-ts-appear-math-test--move 2)
-    (font-lock-ensure)
-    (let ((deadline (+ (float-time) 30)))
-      (while (and (not (markdown-ts-appear-math-test--previews))
-                  (< (float-time) deadline))
-        (accept-process-output nil 0.01)))
-    (let* ((preview (car (markdown-ts-appear-math-test--previews)))
-           (image (overlay-get preview 'latex-to-svg-frontend-image)))
-      (should (eq (car image) 'image))
-      (should (> (car (image-size image t)) 0))
-      (should-not (overlay-get preview 'display))
-      (should-not (get-text-property (point-min) 'invisible))
-      (markdown-ts-appear-math-test--move (point-max))
-      (should (overlay-get preview 'display)))))
+  (let ((latex-to-svg-backend-cache-directory (make-temp-file "appear-math-test-" t))
+        (latex-to-svg-backend--image-cache (make-hash-table :test #'equal)))
+    (unwind-protect
+        (markdown-ts-appear-math-test--buffer "$x^2+1$\n"
+          (switch-to-buffer (current-buffer))
+          (setq markdown-ts-appear-enable-math-preview t)
+          (markdown-ts-appear-mode 1)
+          ;; Require a real asynchronous compile, not a previous disk/memory hit.
+          (should-not (markdown-ts-appear-math-test--previews))
+          (markdown-ts-appear-math-test--move 2)
+          (font-lock-ensure)
+          (let ((deadline (+ (float-time) 30)))
+            (while (and (not (markdown-ts-appear-math-test--previews))
+                        (< (float-time) deadline))
+              (accept-process-output nil 0.01)))
+          (let* ((preview (car (markdown-ts-appear-math-test--previews)))
+                 (image (overlay-get preview 'latex-to-svg-frontend-image)))
+            (should (eq (car image) 'image))
+            (should (> (car (image-size image t)) 0))
+            (should-not (overlay-get preview 'display))
+            (should-not (get-text-property (point-min) 'invisible))
+            (markdown-ts-appear-math-test--move (point-max))
+            (should (overlay-get preview 'display))))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest markdown-ts-appear-math-test-no-markdown-link-in-math ()
   (markdown-ts-appear-math-test--buffer "\\(f[x](y)\\)\n"
@@ -237,6 +253,45 @@
       (should-not (seq-some
                    (lambda (ov) (overlay-get ov 'markdown-ts-appear--link-icon))
                    (overlays-in (point-min) (point-max)))))))
+
+(ert-deftest markdown-ts-appear-math-test-fontification-shares-span-scan ()
+  (markdown-ts-appear-math-test--buffer
+      "Before **one** and **two**, \\(f[x](y)\\).\n"
+    (markdown-ts-appear-math-test--rendered
+      (setq markdown-ts-appear-enable-math-preview t)
+      (markdown-ts-appear-mode 1)
+      (let ((query (symbol-function 'latex-to-svg-frontend-spans))
+            (query-at (symbol-function 'latex-to-svg-frontend-span-at))
+            (calls 0))
+        (cl-letf (((symbol-function 'latex-to-svg-frontend-spans)
+                   (lambda (beg end)
+                     (cl-incf calls)
+                     (funcall query beg end)))
+                  ((symbol-function 'latex-to-svg-frontend-span-at)
+                   (lambda (position)
+                     (cl-incf calls)
+                     (funcall query-at position))))
+          (font-lock-fontify-region (point-min) (point-max))
+          (should (<= calls 1))
+          (should-not (seq-some
+                       (lambda (ov) (overlay-get ov 'markdown-ts-appear--link-icon))
+                       (overlays-in (point-min) (point-max))))
+          ;; Removing the math delimiters must expose a normal Markdown link
+          ;; on the next pass, rather than reusing the old span list.
+          (goto-char (point-min)) (search-forward "\\(") (delete-char -2)
+          (search-forward "\\)") (delete-char -2)
+          (setq calls 0)
+          (font-lock-fontify-region (point-min) (point-max))
+          (should (<= calls 1))
+          (should (seq-some
+                   (lambda (ov) (overlay-get ov 'markdown-ts-appear--link-icon))
+                   (overlays-in (point-min) (point-max))))
+          ;; Plain text has no decoration that needs a math containment check.
+          (erase-buffer)
+          (insert "Plain text without markup.\n")
+          (setq calls 0)
+          (font-lock-fontify-region (point-min) (point-max))
+          (should (zerop calls)))))))
 
 (ert-deftest markdown-ts-appear-math-test-wrapped-row-reveals-math ()
   (markdown-ts-appear-math-test--buffer "| A | B |\n|---|---|\n| $x$ | text |\n"
