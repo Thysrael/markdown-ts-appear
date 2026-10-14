@@ -224,10 +224,6 @@ environment variable, tests with unavailable dependencies are skipped.
 CI uses batch tests and real SVG rendering. Omit `--batch` to include graphical
 interaction tests locally.
 
-`test/latex-to-svg-upstream-test.el` contains separate upstream reproducers,
-including the known failed-edit issue tracked in [#7](https://github.com/Thysrael/markdown-ts-appear/issues/7).
-These diagnostics are not part of the required package CI suite.
-
 Run `python3 test/table-redisplay.py` to check actual terminal cursor positions
 and Evil insert transitions.  This uses a real PTY and the supplied three-column
 CJK regression table; it requires Python 3, Evil, and the Markdown grammars.
