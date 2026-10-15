@@ -342,7 +342,7 @@
                   (should (overlay-buffer preview))
                   (should latex-to-svg-frontend-mode)
                   (setq ready t)
-                  (funcall callback)
+                  (funcall callback nil)
                   (should (= 2 (length (markdown-ts-appear-math-test--previews)))))
               (kill-buffer clone))))))))
 
