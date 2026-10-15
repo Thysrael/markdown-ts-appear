@@ -51,9 +51,9 @@
       (goto-char (point-max))
       (latex-to-svg-frontend--render-region (point-min) (point-max))
       (puthash "$y$" 'new-image ready)
-      (funcall (cdr (assoc "$y$" callbacks)))
+      (funcall (cdr (assoc "$y$" callbacks)) nil)
       (puthash "$x$" 'old-image ready)
-      (funcall old)
+      (funcall old nil)
       (should (equal
                (mapcar (lambda (ov) (overlay-get ov 'latex-to-svg-frontend-source))
                        (latex-to-svg-frontend--overlays-in (point-min) (point-max)))
@@ -64,7 +64,7 @@
     (goto-char 9)
     (latex-to-svg-frontend--handle-cursor)
     (puthash "$x$" 'image ready)
-    (funcall (cdr (assoc "$x$" callbacks)))
+    (funcall (cdr (assoc "$x$" callbacks)) nil)
     (latex-to-svg-frontend--handle-cursor)
     (should-not (overlay-get
                  (car (latex-to-svg-frontend--overlays-in (point-min) (point-max)))
@@ -74,13 +74,13 @@
   (appear-upstream-test--deferred
     (latex-to-svg-for-markdown-mode -1)
     (puthash "$x$" 'image ready)
-    (funcall (cdr (assoc "$x$" callbacks)))
+    (funcall (cdr (assoc "$x$" callbacks)) nil)
     (should-not (latex-to-svg-frontend--overlays-in (point-min) (point-max)))))
 
 (ert-deftest appear-upstream-test-failed-edit-keeps-source ()
   (appear-upstream-test--deferred
     (puthash "$x$" 'old-image ready)
-    (funcall (cdr (assoc "$x$" callbacks)))
+    (funcall (cdr (assoc "$x$" callbacks)) nil)
     (goto-char 9)
     (run-hooks 'post-command-hook)
     (delete-char 1)
@@ -88,7 +88,9 @@
     (run-hooks 'post-command-hook)
     (goto-char (point-max))
     (run-hooks 'post-command-hook)
-    ;; A failed compile returns no image and does not invoke its callback.
+    ;; The backend calls back with a failure plist.
+    (funcall (cdr (assoc "$\\notacommand$" callbacks))
+             (list :kind 'formula :engine 'latex :message "Undefined control sequence"))
     (goto-char 9)
     (run-hooks 'post-command-hook)
     (goto-char (point-max))
