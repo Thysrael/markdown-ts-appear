@@ -475,8 +475,10 @@
           (kill-buffer (current-buffer))
           (should-not markdown-ts-appear-diagram--job)
           (let ((deadline (+ (float-time) 10)))
-            (while (and (process-live-p process) (< (float-time) deadline))
-              (accept-process-output process 0.05)))
+            ;; Process exit can precede delivery of its cleanup sentinel.
+            (while (and (or (process-live-p process) (buffer-live-p log))
+                        (< (float-time) deadline))
+              (accept-process-output nil 0.05)))
           (should-not (process-live-p process))
           (should-not (buffer-live-p log)))))))
 
