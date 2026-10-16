@@ -269,6 +269,8 @@
     (markdown-ts-appear-math-test--rendered
       (setq markdown-ts-appear-enable-math-preview t)
       (markdown-ts-appear-mode 1)
+      ;; Isolate appear's query budget from the adaptor's own unhide pass.
+      (font-lock-remove-keywords nil latex-to-svg-for-markdown--font-lock-keywords)
       (let ((query (symbol-function 'latex-to-svg-frontend-spans))
             (query-at (symbol-function 'latex-to-svg-frontend-span-at))
             (calls 0))
