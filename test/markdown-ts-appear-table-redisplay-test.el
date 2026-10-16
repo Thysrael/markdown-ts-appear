@@ -192,6 +192,31 @@ Have the PTY driver capture the actual native-text cursor instead."
               (markdown-ts-appear-table-redisplay--compare-reference expected)))
         (markdown-ts-appear-mode -1)))))
 
+(ert-deftest markdown-ts-appear-table-redisplay-no-native-background-leak ()
+  (skip-unless (not noninteractive))
+  (let ((background (face-attribute 'markdown-ts-table :background)))
+    (unwind-protect
+        (save-window-excursion
+          (with-temp-buffer
+            (switch-to-buffer (current-buffer))
+            (insert "| A | B |\n|---|---|\n| x | y |\n| z | w |\n\nafter\n")
+            (markdown-ts-mode)
+            (set-face-attribute 'markdown-ts-table nil :background "#123456")
+            (markdown-ts-appear-mode 1)
+            (markdown-ts-appear-stop)
+            (font-lock-ensure)
+            (markdown-ts-appear-table--render 30)
+            (dolist (position (list (point-max) (point-min)))
+              (goto-char position)
+              (markdown-ts-appear-table--post-command)
+              (send-string-to-terminal "\e]777;forbid-sgr;48;2;18;52;86\a")
+              (redraw-display)
+              (redisplay t)
+              (send-string-to-terminal "\e]777;end-forbid-sgr\a")
+              (cl-incf markdown-ts-appear-table-redisplay--checks))
+            (markdown-ts-appear-mode -1)))
+      (set-face-attribute 'markdown-ts-table nil :background background))))
+
 (ert-deftest markdown-ts-appear-table-redisplay-stable-faces ()
   (skip-unless (not noninteractive))
   (require 'evil)

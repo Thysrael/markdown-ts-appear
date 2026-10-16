@@ -40,7 +40,7 @@
 (defconst markdown-ts-appear--advice-bindings
   (append
    '((markdown-ts--fontify-delimiter . markdown-ts-appear--fontify-delimiter)
-     (markdown-ts--fontify-atx-delimiter . markdown-ts-appear--fontify-node)
+     (markdown-ts--fontify-atx-delimiter . markdown-ts-appear--fontify-heading-marker)
      (markdown-ts--fontify-link-destination . markdown-ts-appear--fontify-link-destination)
      (markdown-ts--fontify-link-node . markdown-ts-appear--fontify-link)
      (markdown-ts--fontify-image . markdown-ts-appear-image--fontify)

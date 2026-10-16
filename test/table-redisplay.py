@@ -29,6 +29,7 @@ class Cursor:
         self.references = {}
         self.watch = None
         self.paints = 0
+        self.forbidden_sgr = None
 
     def feed(self, text):
         data = self.pending + text
@@ -63,6 +64,8 @@ class Cursor:
                     elif command in "JK" and self.watch:
                         if command == "J" or self.watch[0] <= self.row < self.watch[1]:
                             self.paints += 1
+                    elif command == "m" and raw == self.forbidden_sgr:
+                        self.errors.append((self.checks, "unexpected background", raw))
                     position = match.end()
                     continue
                 if data.startswith("\x1b]", position):
@@ -89,6 +92,11 @@ class Cursor:
                         if self.paints:
                             self.errors.append((self.checks, "no table repaint", self.paints))
                         self.watch = None
+                    elif payload.startswith("777;forbid-sgr;"):
+                        self.forbidden_sgr = payload.removeprefix("777;forbid-sgr;")
+                    elif payload == "777;end-forbid-sgr":
+                        self.checks += 1
+                        self.forbidden_sgr = None
                     elif payload.startswith("777;done;"):
                         self.expected_checks = int(payload.split(";")[2])
                     position = end + 1

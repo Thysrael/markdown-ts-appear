@@ -132,9 +132,10 @@
     (maphash (lambda (_ source) (markdown-ts-appear-mermaid--delete source)) existing)
     (setq markdown-ts-appear-mermaid--objects (nreverse current))))
 
-(defun markdown-ts-appear-mermaid--windows ()
+(defun markdown-ts-appear-mermaid--windows (&optional update)
   "Return (WINDOW WIDTH LAYOUT START END) for windows showing this buffer.
-LAYOUT describes source font metrics and wrapping, or nil for width-only sizing."
+LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
+UPDATE is t to recompute all window ends, or a window to update only its end."
   (let* ((source-height (eq markdown-ts-appear-mermaid-size 'source))
          (max-width (if source-height markdown-ts-image-max-width
                       markdown-ts-appear-mermaid-size)))
@@ -151,7 +152,8 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
                               (and display-line-numbers
                                    (with-selected-window window (line-number-display-width t)))
                               markdown-ts-appear-code-fence-style))
-                      (window-start window) (window-end window t))))
+                      (window-start window)
+                      (window-end window (or (eq update t) (eq update window))))))
             (get-buffer-window-list (current-buffer) nil t))))
 
 (defun markdown-ts-appear-mermaid--editing-p (source)
@@ -174,6 +176,7 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
        (not (outline-invisible-p (overlay-start source)))
        (seq-some (lambda (entry)
                    (and (display-images-p (window-frame (car entry)))
+                        (nth 4 entry)
                         (< (overlay-start source) (nth 4 entry))
                         (> (overlay-end source) (nth 3 entry))))
                  windows)))
@@ -273,13 +276,13 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
       (dolist (buffer (seq-uniq buffers))
         (with-current-buffer buffer
           (setq markdown-ts-appear-mermaid--view-state nil)
-          (markdown-ts-appear-mermaid--refresh)
+          (markdown-ts-appear-mermaid--refresh t)
           ;; A shorter preview can expose another diagram below the old viewport.
           (when image
-            (run-at-time 0 nil #'markdown-ts-appear-mermaid--refresh-buffer buffer))))
+            (run-at-time 0 nil #'markdown-ts-appear-mermaid--refresh-buffer buffer t))))
       (when (and error buffers)
         (message "Mermaid preview failed; hover the source block for details")))
-    (markdown-ts-appear-mermaid--next)))
+    (markdown-ts-appear-mermaid--next t)))
 
 (defun markdown-ts-appear-mermaid--render (job)
   "Start an asynchronous mmdc process for JOB."
@@ -294,7 +297,10 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
         (progn
           (let ((coding-system-for-write 'utf-8-unix))
             (with-temp-file input (insert (nth 2 key)))
-            (with-temp-file config (insert "{\"htmlLabels\":false}")))
+            ;; SVG shadows can stall Emacs's synchronous image rasterization.
+            (with-temp-file config
+              (insert "{\"htmlLabels\":false,\"themeVariables\":"
+                      "{\"dropShadow\":\"none\",\"nodeShadow\":false}}")))
           (setq markdown-ts-appear-mermaid--process
                 (make-process
                  :name "markdown-ts-appear-mermaid" :buffer log :noquery t
@@ -326,15 +332,16 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
        (delete-directory directory t)
        (markdown-ts-appear-mermaid--complete job nil (error-message-string err))))))
 
-(defun markdown-ts-appear-mermaid--next ()
-  "Start the next job that still has a visible, unedited source."
+(defun markdown-ts-appear-mermaid--next (&optional update)
+  "Start the next job that still has a visible, unedited source.
+UPDATE selects which window ends to recompute."
   (while (and (not markdown-ts-appear-mermaid--job) markdown-ts-appear-mermaid--queue)
     (let ((job (pop markdown-ts-appear-mermaid--queue)))
       (when (seq-some (lambda (source)
                         (and (markdown-ts-appear-mermaid--current-p source (car job))
                              (with-current-buffer (overlay-buffer source)
                                (markdown-ts-appear-mermaid--eligible-p
-                                source (markdown-ts-appear-mermaid--windows)))))
+                                source (markdown-ts-appear-mermaid--windows update)))))
                       (cdr job))
         (setq markdown-ts-appear-mermaid--job job)
         (markdown-ts-appear-mermaid--render job)))))
@@ -350,8 +357,9 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
       (setq markdown-ts-appear-mermaid--queue
             (nconc markdown-ts-appear-mermaid--queue (list (list key source)))))))
 
-(defun markdown-ts-appear-mermaid--refresh (&rest _)
-  "Update changed sources and preview visibility without repeating renders."
+(defun markdown-ts-appear-mermaid--refresh (&optional update)
+  "Update changed sources and preview visibility without repeating renders.
+UPDATE selects window ends to recompute, outside ordinary command hooks."
   (when (and (not markdown-ts-appear-mermaid--refreshing)
              (memq #'markdown-ts-appear-mermaid--refresh post-command-hook))
     (let ((markdown-ts-appear-mermaid--refreshing t))
@@ -369,7 +377,7 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
                     markdown-ts-appear-mermaid--view-state nil)
               (markdown-ts-appear-mermaid--scan theme))
             (when markdown-ts-appear-mermaid--objects
-              (let* ((windows (markdown-ts-appear-mermaid--windows))
+              (let* ((windows (markdown-ts-appear-mermaid--windows update))
                      (previous markdown-ts-appear-mermaid--view-state)
                      (view (list scan windows (markdown-ts-appear-mermaid--editing-source))))
                 (unless (equal view previous)
@@ -387,7 +395,7 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
                                (not (overlay-get source 'markdown-ts-appear-mermaid--error))
                                (markdown-ts-appear-mermaid--eligible-p source windows))
                       (markdown-ts-appear-mermaid--request source)))))))))
-      (markdown-ts-appear-mermaid--next))))
+      (markdown-ts-appear-mermaid--next update))))
 
 (defun markdown-ts-appear-mermaid--after-change (beg end &rest _)
   "Invalidate the scan after an edit to a fenced block between BEG and END."
@@ -405,16 +413,17 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
 (defun markdown-ts-appear-mermaid--invalidate (&rest _)
   "Recheck previews after window or outline changes."
   (setq markdown-ts-appear-mermaid--view-state nil)
-  (markdown-ts-appear-mermaid--refresh))
+  (markdown-ts-appear-mermaid--refresh t))
 
 (defun markdown-ts-appear-mermaid--scroll (window _start)
   "Refresh previews when WINDOW scrolls to START."
-  (markdown-ts-appear-mermaid--refresh-buffer (window-buffer window)))
+  (markdown-ts-appear-mermaid--refresh-buffer (window-buffer window) window))
 
-(defun markdown-ts-appear-mermaid--refresh-buffer (buffer)
-  "Refresh visible diagrams if BUFFER is still live."
+(defun markdown-ts-appear-mermaid--refresh-buffer (buffer &optional update)
+  "Refresh visible diagrams if BUFFER is still live.
+UPDATE selects which window ends to recompute."
   (when (buffer-live-p buffer)
-    (with-current-buffer buffer (markdown-ts-appear-mermaid--refresh))))
+    (with-current-buffer buffer (markdown-ts-appear-mermaid--refresh update))))
 
 (defun markdown-ts-appear-mermaid--setup ()
   "Install Mermaid previews in the current buffer."
@@ -429,7 +438,7 @@ LAYOUT describes source font metrics and wrapping, or nil for width-only sizing.
   (add-hook 'window-configuration-change-hook #'markdown-ts-appear-mermaid--invalidate nil t)
   (add-hook 'window-scroll-functions #'markdown-ts-appear-mermaid--scroll nil t)
   (markdown-ts-appear--add-outline-hook #'markdown-ts-appear-mermaid--invalidate 90)
-  (markdown-ts-appear-mermaid--refresh))
+  (markdown-ts-appear-mermaid--refresh t))
 
 (defun markdown-ts-appear-mermaid--detach ()
   "Detach Mermaid state without deleting previews inherited from a base buffer."

@@ -250,6 +250,13 @@
              (striped (markdown-ts-appear-table-test--display (car (last rows)))))
         (should (memq 'markdown-ts-appear-table-header
                       (get-text-property (string-match "Title" header) 'face header)))
+        (should-not (memq 'markdown-ts-appear-table-cell
+                          (get-text-property (string-match "Title" header) 'face header)))
+        (dolist (row (cddr rows))
+          (let ((text (markdown-ts-appear-table-test--display row)))
+            (should (memq 'markdown-ts-appear-table-cell
+                          (get-text-property (string-match "plain\\|shaded" text)
+                                             'face text)))))
         ;; A box-drawing character written in a cell is content, not a border.
         (dolist (text (list header striped))
           (let* ((index (1+ (string-match "[Hz]│" text)))

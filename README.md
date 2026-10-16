@@ -97,6 +97,7 @@ faces.  See `C-h v` and `M-x describe-face` for full documentation.
 
 | Option | Default | Values and effect |
 | --- | --- | --- |
+| `markdown-ts-appear-heading-bullets` | `nil` | List of strings or characters, e.g. `'("◉" "○")`, cycled by ATX heading level; `nil` keeps normal rendering. |
 | `markdown-ts-appear-link-icon` | `""` | String before ordinary links; empty disables it. |
 | `markdown-ts-appear-image-icon` | `""` | String before image links; empty disables it. |
 | `markdown-ts-appear-wikilink-icon` | `"◆"` | String before Wiki links; empty disables it. |
@@ -124,6 +125,7 @@ Re-enable `markdown-ts-appear-mode` after changing either preview-enable option.
 | `markdown-ts-appear-block-quote-marker` | Block quote markers. |
 | `markdown-ts-appear-table` | Base font and appearance of wrapped tables; set its font for monospaced alignment. |
 | `markdown-ts-appear-table-header` | Wrapped table header cells; bold by default. |
+| `markdown-ts-appear-table-cell` | Data cells, underneath optional zebra shading. |
 | `markdown-ts-appear-table-border` | Wrapped table borders, independent of row shading. |
 | `markdown-ts-appear-table-zebra` | Alternating data-cell backgrounds in wrapped tables. |
 
@@ -136,6 +138,9 @@ only in insert state, use one of these configurations.  State hooks are local
 to each buffer and are removed when appear mode is disabled.
 
 ### Evil
+
+[evil-collection](https://github.com/emacs-evil/evil-collection) includes this
+integration, so no extra configuration is needed if you use it.  Otherwise:
 
 ```emacs-lisp
 (defun my/markdown-appear-evil ()

@@ -58,6 +58,15 @@ class CursorStreamTest(unittest.TestCase):
         self.assertEqual(cursor.checks, 1)
         self.assertEqual(cursor.pending, "")
 
+    def test_background_leak_detection_survives_chunking(self):
+        cursor = Cursor()
+        for char in ("\x1b]777;forbid-sgr;48;2;18;52;86\a"
+                     "\x1b[48;2;18;52;86m   \x1b]777;end-forbid-sgr\a"):
+            cursor.feed(char)
+        self.assertEqual(cursor.errors, [(0, "unexpected background", "48;2;18;52;86")])
+        self.assertEqual(cursor.checks, 1)
+        self.assertIsNone(cursor.forbidden_sgr)
+
 
 if __name__ == "__main__":
     unittest.main()

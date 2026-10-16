@@ -79,6 +79,16 @@ A positive integer limits only the width, in pixels."
   :initialize #'custom-initialize-default
   :set #'markdown-ts-appear--set-render-option)
 
+(defcustom markdown-ts-appear-heading-bullets nil
+  "Symbols replacing the leading hashes of rendered ATX headings.
+Each entry is a string or character, followed by a space when displayed.
+Entries cycle through heading levels one to six.  Nil keeps the normal
+heading rendering.  Empty headings and headings being edited keep their
+source markers."
+  :type '(repeat (choice (string :tag "String") (character :tag "Character")))
+  :initialize #'custom-initialize-default
+  :set #'markdown-ts-appear--set-render-option)
+
 (defcustom markdown-ts-appear-link-icon ""
   "Icon displayed before rendered Markdown links.
 An empty string disables the icon."
@@ -207,14 +217,60 @@ The `wrapped' style uses `markdown-table-wrap' to fit cells to the window."
       (put-text-property beg end 'display display)
       (put-text-property beg end 'markdown-ts-appear--decoration t))))
 
+(defun markdown-ts-appear--original-prefix (prefix)
+  "Return PREFIX without the decoration installed by this mode."
+  (if-let* (((stringp prefix))
+            ((> (length prefix) 0))
+            (original (get-text-property 0 'markdown-ts-appear--prefix prefix)))
+      (car original)
+    prefix))
+
+(defun markdown-ts-appear--clear-prefixes (beg end)
+  "Restore external prefixes between BEG and END before unfontification."
+  (with-silent-modifications
+    (dolist (property '(line-prefix wrap-prefix))
+      (let ((pos beg))
+        (while (< pos end)
+          (let* ((next (next-single-property-change pos property nil end))
+                 (prefix (get-text-property pos property))
+                 (original (markdown-ts-appear--original-prefix prefix)))
+            (unless (eq prefix original)
+              (put-text-property pos next property original))
+            (setq pos next)))))))
+
+(defun markdown-ts-appear--decorate-prefix
+    (beg end property display &optional base-property)
+  "Append DISPLAY to external PROPERTY prefixes between BEG and END.
+Use BASE-PROPERTY for the external indentation when non-nil.  Quoted code
+uses `line-prefix' so its rendered quote markers replace the raw wrap suffix."
+  (let ((pos beg)
+        (base-property (or base-property property)))
+    (with-silent-modifications
+      (while (< pos end)
+        (let* ((next (min (next-single-property-change pos property nil end)
+                          (next-single-property-change pos base-property nil end)))
+               (original (markdown-ts-appear--original-prefix
+                          (get-text-property pos property)))
+               (base (or (markdown-ts-appear--original-prefix
+                          (get-text-property pos base-property))
+                         (symbol-value base-property)))
+               (prefix (concat (cond ((null base) "")
+                                     ((stringp base) base)
+                                     (t (propertize " " 'display base)))
+                               display)))
+          ;; Keep ownership on the installed value: an external replacement
+          ;; must not be overwritten with our saved, now stale, prefix.
+          (put-text-property 0 (length prefix) 'markdown-ts-appear--prefix
+                             (list original) prefix)
+          (add-text-properties
+           pos next (list property prefix 'markdown-ts-appear--decoration t))
+          (setq pos next))))))
+
 (defun markdown-ts-appear--decorate-line-prefix (beg end prefix face)
   "Display PREFIX with FACE before visual lines between BEG and END."
-  (let ((display (copy-sequence prefix)))
-    (add-face-text-property 0 (length display) face t display)
-    (with-silent-modifications
-      (add-text-properties
-       beg end `(line-prefix ,display wrap-prefix ,display
-                            markdown-ts-appear--decoration t)))))
+  (let ((display (propertize prefix 'face face)))
+    (dolist (property '(line-prefix wrap-prefix))
+      (markdown-ts-appear--decorate-prefix beg end property display))))
 
 (defun markdown-ts-appear--remove-markup-invisibility (beg end)
   "Remove Markdown markup invisibility between BEG and END."
@@ -656,12 +712,12 @@ BLOCK is the Markdown node already found at POS, when available."
                treesit-font-lock-settings)))))
   (add-to-list 'font-lock-extra-managed-props
                'markdown-ts-appear--decoration)
-  (dolist (property (cons 'line-height
-                          (and (eq markdown-ts-appear-code-fence-style 'connected)
-                               '(line-prefix wrap-prefix))))
-    (unless (memq property font-lock-extra-managed-props)
-      (push property markdown-ts-appear--managed-properties)
-      (add-to-list 'font-lock-extra-managed-props property)))
+  (when (eq markdown-ts-appear-code-fence-style 'connected)
+    (add-function :before (local 'font-lock-unfontify-region-function)
+                  #'markdown-ts-appear--clear-prefixes))
+  (unless (memq 'line-height font-lock-extra-managed-props)
+    (push 'line-height markdown-ts-appear--managed-properties)
+    (add-to-list 'font-lock-extra-managed-props 'line-height))
   (unless (advice-function-member-p
            #'markdown-ts-appear--decoration-filter-copied-text
            filter-buffer-substring-function)
@@ -701,6 +757,35 @@ BLOCK is the Markdown node already found at POS, when available."
                 (not (or (markdown-ts-appear--node-visible-p node)
                          (markdown-ts-appear--atx-marker-visible-p node))))))
       (apply function node override start limit rest))))
+
+(defun markdown-ts-appear--fontify-heading-marker
+    (function node override start limit &rest rest)
+  "Call FUNCTION for NODE, decorating rendered ATX heading markers.
+OVERRIDE, START, LIMIT and REST are the native fontifier arguments."
+  (if (and markdown-ts-appear-heading-bullets
+           (markdown-ts-appear--active-p)
+           markdown-ts-hide-markup
+           (not (markdown-ts-appear--node-visible-p node))
+           (not (markdown-ts-appear--atx-marker-visible-p node)))
+      (let* ((marker-end (treesit-node-end node))
+             (beg (save-excursion
+                    (goto-char (treesit-node-start node))
+                    (skip-chars-forward " \t" marker-end)
+                    (point)))
+             (level (- marker-end beg))
+             (end (save-excursion
+                    (goto-char marker-end)
+                    (skip-chars-forward " \t" (line-end-position))
+                    (point)))
+             (bullet (nth (mod (1- level) (length markdown-ts-appear-heading-bullets))
+                          markdown-ts-appear-heading-bullets))
+             (markdown-ts-hide-markup nil))
+        (apply function node override start limit rest)
+        (when (and (<= start beg) (<= end limit))
+          (markdown-ts-appear--decorate
+           beg end (concat (if (characterp bullet) (char-to-string bullet) bullet) " ")
+           (intern (format "markdown-ts-heading-%d" level)))))
+    (apply #'markdown-ts-appear--fontify-node function node override start limit rest)))
 
 (defun markdown-ts-appear--fence-opening-p (node)
   "Return non-nil when fenced delimiter NODE opens its code block."
@@ -800,10 +885,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
                  (markdown-ts-appear--code-quote-prefix
                   (buffer-substring-no-properties body-beg content-beg))))
             (when (< wrap-beg end)
-              (with-silent-modifications
-                (add-text-properties
-                 wrap-beg end `(wrap-prefix ,wrap-prefix
-                                            markdown-ts-appear--decoration t)))))
+              (markdown-ts-appear--decorate-prefix
+               wrap-beg end 'wrap-prefix wrap-prefix 'line-prefix)))
           (dolist (prefix (markdown-ts-appear--quote-prefixes node beg end))
             (pcase-let ((`(,marker-beg . ,marker-end) (car (last prefix))))
               (when (and (<= beg marker-beg) (< marker-beg end)
@@ -1227,6 +1310,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
 
 (defun markdown-ts-appear--release-managed-properties ()
   "Release font-lock properties managed by the current buffer."
+  (remove-function (local 'font-lock-unfontify-region-function)
+                   #'markdown-ts-appear--clear-prefixes)
   (dolist (property markdown-ts-appear--managed-properties)
     (setq font-lock-extra-managed-props
           (remove property font-lock-extra-managed-props)))

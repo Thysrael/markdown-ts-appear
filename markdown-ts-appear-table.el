@@ -78,6 +78,11 @@ Customize this face's font to keep tables aligned in variable-pitch buffers."
   "Face for cell contents in wrapped table headers."
   :group 'markdown-ts-appear)
 
+(defface markdown-ts-appear-table-cell
+  '((t :inherit markdown-ts-appear-table))
+  "Face for wrapped data cells, underneath optional zebra shading."
+  :group 'markdown-ts-appear)
+
 (defface markdown-ts-appear-table-border
   '((t :inherit (markdown-ts-appear-table shadow)))
   "Face for generated borders in wrapped tables."
@@ -286,6 +291,13 @@ Customize this face's font to keep tables aligned in variable-pitch buffers."
       (max 1 (window-max-chars-per-line window 'markdown-ts-appear-table))
     80))
 
+(defun markdown-ts-appear-table--line-prefix-width (position window)
+  "Return the column width of a string line prefix at POSITION in WINDOW."
+  (let ((prefix (or (get-char-property position 'line-prefix
+                                     (and (window-live-p window) window))
+                    line-prefix)))
+    (if (stringp prefix) (string-width prefix) 0)))
+
 (defun markdown-ts-appear-table--display-windows ()
   "Return live non-minibuffer windows showing the current buffer.
 Return a single nil entry when the buffer is not currently displayed."
@@ -305,15 +317,16 @@ Return a single nil entry when the buffer is not currently displayed."
    (if width (list nil) (markdown-ts-appear-table--display-windows))))
 
 (defun markdown-ts-appear-table--display-string
-    (lines newline-p &optional face prefix-length)
+    (lines newline-p &optional faces prefix-length)
   "Join display LINES and preserve the source newline when NEWLINE-P.
-Apply FACE to cells, leaving generated borders and PREFIX-LENGTH characters
+Apply FACES to cells, leaving generated borders and PREFIX-LENGTH characters
 of container indentation unshaded."
   (save-match-data
     (dolist (line lines)
       (let ((pos (or prefix-length 0)))
-        (when face
-          (add-face-text-property pos (length line) face t line))
+        (dolist (face faces)
+          (when face
+            (add-face-text-property pos (length line) face t line)))
         (while (setq pos (string-match "[│├┼┤─]+" line pos))
           ;; Literal box-drawing characters inside a cell carry source data.
           ;; Style borders before `--map-pipes' gives them source positions too.
@@ -328,6 +341,12 @@ of container indentation unshaded."
     ;; would recolor the entire row, including its before/after strings.
     (add-face-text-property 0 (length display)
                             '(markdown-ts-appear-table default) t display)
+    ;; Extend the buffer background, not the source table face, past each row.
+    ;; This also applies to newlines in the cursor's before/after strings.
+    (let ((pos 0))
+      (while (setq pos (string-search "\n" display pos))
+        (put-text-property pos (1+ pos) 'face '(:inherit default :extend t) display)
+        (setq pos (1+ pos))))
     display))
 
 (defun markdown-ts-appear-table--row-bounds (row)
@@ -380,8 +399,8 @@ STRIPE-P marks alternate data rows for optional background shading."
                 (markdown-ts-appear-table--display-string
                  lines newline-p
                  (if (equal (treesit-node-type row) "pipe_table_header")
-                     'markdown-ts-appear-table-header
-                   stripe-face)
+                     '(markdown-ts-appear-table-header)
+                   (list stripe-face 'markdown-ts-appear-table-cell))
                  (length (markdown-ts-appear-table--prefix row))))
                (overlay (make-overlay beg end nil nil nil)))
     (markdown-ts-appear-table--map-pipes row display)
@@ -417,11 +436,17 @@ STRIPE-P marks alternate data rows for optional background shading."
          (prefix-width (apply #'max 0 (mapcar #'string-width prefixes)))
          (id (list 'table)))
     (pcase-dolist (`(,window ,width ,_font) windows)
-      (let ((data-row-index 0)
-            (widths (markdown-table-wrap-compute-widths
-                     (car cells) (cddr cells)
-                     (max 1 (- width prefix-width))
-                     (length aligns))))
+      (let* ((data-row-index 0)
+             (indent-width
+              (apply #'max 0
+                     (mapcar (lambda (row)
+                               (markdown-ts-appear-table--line-prefix-width
+                                (car (markdown-ts-appear-table--row-bounds row)) window))
+                             rows)))
+             (widths (markdown-table-wrap-compute-widths
+                      (car cells) (cddr cells)
+                      (max 1 (- width prefix-width indent-width))
+                      (length aligns))))
         (cl-mapc
          (lambda (row contents prefix)
            (let* ((type (treesit-node-type row))
