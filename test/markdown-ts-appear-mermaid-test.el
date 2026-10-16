@@ -25,21 +25,22 @@
 (defconst markdown-ts-appear-mermaid-test--svg
   "<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><rect width='240' height='240' fill='#7dd3fc'/></svg>")
 (defvar markdown-ts-appear-mermaid-test--jobs nil)
-(defvar markdown-ts-appear-mermaid-test--command "mmdc")
 
 (defmacro markdown-ts-appear-mermaid-test--isolated (&rest body)
   "Run BODY with isolated render state."
   (declare (indent 0) (debug t))
-  `(let ((markdown-ts-appear-mermaid--cache (make-hash-table :test #'equal))
-         markdown-ts-appear-mermaid--queue markdown-ts-appear-mermaid--job
-         markdown-ts-appear-mermaid--process markdown-ts-appear-mermaid-test--jobs)
+  `(let ((markdown-ts-appear-diagram--cache
+          (make-hash-table :test 'markdown-ts-appear-diagram--key-equal))
+         markdown-ts-appear-diagram--queue markdown-ts-appear-diagram--job
+         markdown-ts-appear-diagram--cancel
+         markdown-ts-appear-mermaid-test--jobs)
      ,@body))
 
 (defmacro markdown-ts-appear-mermaid-test--deferred (&rest body)
   "Run BODY using the real queue and a deferred renderer."
   (declare (indent 0) (debug t))
   `(markdown-ts-appear-mermaid-test--isolated
-     (cl-letf (((symbol-function 'markdown-ts-appear-mermaid--render)
+     (cl-letf (((symbol-function 'markdown-ts-appear-diagram--render)
                 (lambda (job) (push job markdown-ts-appear-mermaid-test--jobs)))
                ((symbol-function 'executable-find) (lambda (_) "mmdc"))
                ((symbol-function 'image-type-available-p) (lambda (_) t))
@@ -60,8 +61,8 @@
                (set-window-buffer (selected-window) buffer)
                (let ((markdown-ts-inline-images nil)
                      (markdown-ts-appear-enable-math-preview nil)
-                     (markdown-ts-appear-enable-mermaid-preview t)
-                     (markdown-ts-appear-mermaid-command markdown-ts-appear-mermaid-test--command)
+                     (markdown-ts-appear-diagram-renderers
+                      '(("mermaid" . markdown-ts-appear-diagram-mmdc)))
                      (treesit-font-lock-level 4))
                  (markdown-ts-mode)
                  (goto-char (point-max))
@@ -70,25 +71,26 @@
                  ,@body)))
          (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
-(defun markdown-ts-appear-mermaid-test--deliver (&optional error)
-  "Complete the running job with an SVG, or with ERROR."
-  (should markdown-ts-appear-mermaid--job)
-  (markdown-ts-appear-mermaid--complete
-   markdown-ts-appear-mermaid--job
+(defun markdown-ts-appear-mermaid-test--deliver (&optional error job)
+  "Complete JOB, or the running job, with an SVG or ERROR."
+  (setq job (or job markdown-ts-appear-diagram--job))
+  (should job)
+  (markdown-ts-appear-diagram--complete
+   job
    (unless error (list 'image :type 'svg :data markdown-ts-appear-mermaid-test--svg :scale 1))
    error))
 
 (defun markdown-ts-appear-mermaid-test--view (&optional source)
   "Return the first view for SOURCE or the first diagram."
-  (car (overlay-get (or source (car markdown-ts-appear-mermaid--objects))
-                    'markdown-ts-appear-mermaid--views)))
+  (car (overlay-get (or source (car markdown-ts-appear-diagram--objects))
+                    'markdown-ts-appear-diagram--views)))
 
 (defun markdown-ts-appear-mermaid-test--wait ()
   "Wait for real Mermaid jobs to finish."
   (let ((deadline (+ (float-time) 60)))
-    (while (and markdown-ts-appear-mermaid--job (< (float-time) deadline))
+    (while (and markdown-ts-appear-diagram--job (< (float-time) deadline))
       (accept-process-output nil 0.05)))
-  (should-not markdown-ts-appear-mermaid--job))
+  (should-not markdown-ts-appear-diagram--job))
 
 (ert-deftest markdown-ts-appear-mermaid-test-parses-native-fences-and-containers ()
   (dolist (text '("```mermaid\nflowchart LR\nA --> B\n```\n"
@@ -97,9 +99,9 @@
                   "- ```mermaid\n  flowchart LR\n  A --> B\n  ```\n"))
     (markdown-ts-appear-mermaid-test--deferred
       (markdown-ts-appear-mermaid-test--buffer (concat text "\nAfter\n")
-        (should (= (length markdown-ts-appear-mermaid--objects) 1))
+        (should (= (length markdown-ts-appear-diagram--objects) 1))
         (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
-        (should (equal (nth 2 (car markdown-ts-appear-mermaid--job)) "flowchart LR\nA --> B\n"))
+        (should (equal (nth 2 (car markdown-ts-appear-diagram--job)) "flowchart LR\nA --> B\n"))
         (should-not (buffer-modified-p))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-ignores-other-and-unclosed-fences ()
@@ -108,7 +110,7 @@
                   "```mermaid\nflowchart LR\nA --> B\n"))
     (markdown-ts-appear-mermaid-test--deferred
       (markdown-ts-appear-mermaid-test--buffer text
-        (should-not markdown-ts-appear-mermaid--objects)
+        (should-not markdown-ts-appear-diagram--objects)
         (should-not markdown-ts-appear-mermaid-test--jobs)))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-reuses-preview-across-editing ()
@@ -123,7 +125,7 @@
         (search-forward "A -->")
         (markdown-ts-appear-start)
         (should-not (overlay-get view 'display))
-        (dotimes (_ 10) (markdown-ts-appear-mermaid--refresh))
+        (dotimes (_ 10) (markdown-ts-appear-diagram--refresh))
         (markdown-ts-appear-stop)
         (should (eq image (overlay-get view 'display)))
         (should (eq (overlay-get view 'extension-data) 'retained))
@@ -135,17 +137,17 @@
   (markdown-ts-appear-mermaid-test--deferred
     (markdown-ts-appear-mermaid-test--buffer
         (concat markdown-ts-appear-mermaid-test--diagram markdown-ts-appear-mermaid-test--diagram)
-      (should (= (length markdown-ts-appear-mermaid--objects) 2))
+      (should (= (length markdown-ts-appear-diagram--objects) 2))
       (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
-      (should (= (length (cdr markdown-ts-appear-mermaid--job)) 2))
+      (should (= (length (cdr markdown-ts-appear-diagram--job)) 2))
       (markdown-ts-appear-mermaid-test--deliver)
-      (let ((image (overlay-get (car markdown-ts-appear-mermaid--objects)
-                                 'markdown-ts-appear-mermaid--image)))
-        (should (eq image (overlay-get (cadr markdown-ts-appear-mermaid--objects)
-                                      'markdown-ts-appear-mermaid--image)))
+      (let ((image (overlay-get (car markdown-ts-appear-diagram--objects)
+                                 'markdown-ts-appear-diagram--image)))
+        (should (eq image (overlay-get (cadr markdown-ts-appear-diagram--objects)
+                                      'markdown-ts-appear-diagram--image)))
         (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
-          (should (eq image (overlay-get (car markdown-ts-appear-mermaid--objects)
-                                        'markdown-ts-appear-mermaid--image)))
+          (should (eq image (overlay-get (car markdown-ts-appear-diagram--objects)
+                                        'markdown-ts-appear-diagram--image)))
           (should (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
           (should (= (length markdown-ts-appear-mermaid-test--jobs) 1)))))))
 
@@ -155,15 +157,15 @@
         (concat markdown-ts-appear-mermaid-test--diagram
                 "\n```mermaid\nsequenceDiagram\nAlice->>Bob: Hello\n```\n\nAfter\n")
       (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
-      (should (= (length markdown-ts-appear-mermaid--queue) 1))
-      (should (string-prefix-p "flowchart" (nth 2 (car markdown-ts-appear-mermaid--job))))
+      (should (= (length markdown-ts-appear-diagram--queue) 1))
+      (should (string-prefix-p "flowchart" (nth 2 (car markdown-ts-appear-diagram--job))))
       (markdown-ts-appear-mermaid-test--deliver)
       (should (= (length markdown-ts-appear-mermaid-test--jobs) 2))
-      (should markdown-ts-appear-mermaid--job)
+      (should markdown-ts-appear-diagram--job)
       (markdown-ts-appear-mermaid-test--deliver)
-      (should-not markdown-ts-appear-mermaid--queue)
-      (should-not markdown-ts-appear-mermaid--job)
-      (dolist (source markdown-ts-appear-mermaid--objects)
+      (should-not markdown-ts-appear-diagram--queue)
+      (should-not markdown-ts-appear-diagram--job)
+      (dolist (source markdown-ts-appear-diagram--objects)
         (should (overlay-get (markdown-ts-appear-mermaid-test--view source) 'display))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-rejects-stale-result-before-refresh ()
@@ -173,13 +175,13 @@
       (search-forward "A --> B")
       (replace-match "A --> C" t t)
       (markdown-ts-appear-mermaid-test--deliver)
-      (should-not (overlay-get (car markdown-ts-appear-mermaid--objects)
-                               'markdown-ts-appear-mermaid--image))
+      (should-not (overlay-get (car markdown-ts-appear-diagram--objects)
+                               'markdown-ts-appear-diagram--image))
       (markdown-ts-appear-start)
       (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
       (markdown-ts-appear-stop)
       (should (= (length markdown-ts-appear-mermaid-test--jobs) 2))
-      (should (string-match-p "A --> C" (nth 2 (car markdown-ts-appear-mermaid--job))))
+      (should (string-match-p "A --> C" (nth 2 (car markdown-ts-appear-diagram--job))))
       (markdown-ts-appear-mermaid-test--deliver)
       (should (overlay-get (markdown-ts-appear-mermaid-test--view) 'display)))))
 
@@ -190,8 +192,8 @@
       (search-forward "flowchart")
       (markdown-ts-appear-start)
       (markdown-ts-appear-mermaid-test--deliver)
-      (should (overlay-get (car markdown-ts-appear-mermaid--objects)
-                           'markdown-ts-appear-mermaid--image))
+      (should (overlay-get (car markdown-ts-appear-diagram--objects)
+                           'markdown-ts-appear-diagram--image))
       (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
       (markdown-ts-appear-stop)
       (should (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
@@ -200,16 +202,16 @@
 (ert-deftest markdown-ts-appear-mermaid-test-invalidates-distant-structural-edits ()
   (markdown-ts-appear-mermaid-test--deferred
     (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
-      (let ((source (car markdown-ts-appear-mermaid--objects))
+      (let ((source (car markdown-ts-appear-diagram--objects))
             (view (markdown-ts-appear-mermaid-test--view)))
         (goto-char (point-min))
         (insert "````text\n")
         (goto-char (point-max))
         (insert "````\n")
         (markdown-ts-appear-mermaid-test--deliver)
-        (should-not (overlay-get source 'markdown-ts-appear-mermaid--image))
-        (markdown-ts-appear-mermaid--refresh)
-        (should-not markdown-ts-appear-mermaid--objects)
+        (should-not (overlay-get source 'markdown-ts-appear-diagram--image))
+        (markdown-ts-appear-diagram--refresh)
+        (should-not markdown-ts-appear-diagram--objects)
         (should-not (overlay-buffer view))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-new-image-wins-after-editing-resumes ()
@@ -247,8 +249,8 @@
         (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
         (search-forward "mermaid")
         (replace-match "text" t t)
-        (markdown-ts-appear-mermaid--refresh)
-        (should-not markdown-ts-appear-mermaid--objects)
+        (markdown-ts-appear-diagram--refresh)
+        (should-not markdown-ts-appear-diagram--objects)
         (should-not (overlay-buffer view))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-errors-preserve-source-and-retry-after-edit ()
@@ -257,7 +259,7 @@
       (markdown-ts-appear-mermaid-test--deliver "Parse error")
       (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
       (should (equal (overlay-get (markdown-ts-appear-mermaid-test--view) 'help-echo) "Parse error"))
-      (dotimes (_ 10) (markdown-ts-appear-mermaid--invalidate))
+      (dotimes (_ 10) (markdown-ts-appear-diagram--invalidate))
       (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
       (should (equal (buffer-string) markdown-ts-appear-mermaid-test--diagram))
       (goto-char (point-min))
@@ -282,7 +284,7 @@
           (markdown-ts-appear--theme-change nil)
           (markdown-ts-appear-mermaid-test--deliver)
           (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
-          (should (equal (cadr (car markdown-ts-appear-mermaid--job)) "dark"))
+          (should (equal (cadr (car markdown-ts-appear-diagram--job)) "dark"))
           (markdown-ts-appear-mermaid-test--deliver)
           (should (overlay-get (markdown-ts-appear-mermaid-test--view) 'display)))))))
 
@@ -297,12 +299,12 @@
             (progn
               (with-current-buffer clone
                 (should-not markdown-ts-appear-mode)
-                (should-not markdown-ts-appear-mermaid--objects))
+                (should-not markdown-ts-appear-diagram--objects))
               (should (overlay-get view 'display))
               (markdown-ts-appear-mode -1)
               (should-not (overlay-buffer view))
               (should (overlay-buffer foreign))
-              (should-not (memq #'markdown-ts-appear-mermaid--refresh post-command-hook)))
+              (should-not (memq #'markdown-ts-appear-diagram--refresh post-command-hook)))
           (kill-buffer clone))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-coalesces-transient-theme-changes ()
@@ -327,14 +329,15 @@
   (dolist (action '(disable kill option))
     (markdown-ts-appear-mermaid-test--deferred
       (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
-        (let ((source (car markdown-ts-appear-mermaid--objects))
+        (let ((job markdown-ts-appear-diagram--job)
+              (source (car markdown-ts-appear-diagram--objects))
               (view (markdown-ts-appear-mermaid-test--view)))
           (pcase action
             ('disable (markdown-ts-appear-mode -1))
             ('kill (kill-buffer (current-buffer)))
-            ('option (setq markdown-ts-appear-enable-mermaid-preview nil)))
-          (markdown-ts-appear-mermaid-test--deliver)
-          (should-not (overlay-get source 'markdown-ts-appear-mermaid--image))
+            ('option (setq markdown-ts-appear-diagram-renderers nil)))
+          (markdown-ts-appear-mermaid-test--deliver nil job)
+          (should-not (overlay-get source 'markdown-ts-appear-diagram--image))
           (should-not (overlay-get view 'display)))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-unchanged-motion-does-not-rescan ()
@@ -342,15 +345,15 @@
     (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
       (markdown-ts-appear-mermaid-test--deliver)
       (redisplay t)
-      (markdown-ts-appear-mermaid--refresh)
-      (cl-letf (((symbol-function 'markdown-ts-appear-mermaid--scan)
+      (markdown-ts-appear-diagram--refresh)
+      (cl-letf (((symbol-function 'markdown-ts-appear-diagram--scan)
                  (lambda (&rest _) (ert-fail "Unchanged syntax was scanned again")))
-                ((symbol-function 'markdown-ts-appear-mermaid--display)
+                ((symbol-function 'markdown-ts-appear-diagram--display)
                  (lambda (&rest _) (ert-fail "Plain cursor motion refreshed diagrams"))))
-        (dotimes (_ 20) (markdown-ts-appear-mermaid--refresh))
+        (dotimes (_ 20) (markdown-ts-appear-diagram--refresh))
         (goto-char (point-min))
-        (markdown-ts-appear-mermaid--refresh))
-      (cl-letf (((symbol-function 'markdown-ts-appear-mermaid--scan)
+        (markdown-ts-appear-diagram--refresh))
+      (cl-letf (((symbol-function 'markdown-ts-appear-diagram--scan)
                  (lambda (&rest _) (ert-fail "Unrelated prose edit rescanned diagrams"))))
         (goto-char 3)
         (insert "new text ")
@@ -362,55 +365,23 @@
     (markdown-ts-appear-mermaid-test--deferred
       (markdown-ts-appear-mermaid-test--buffer
           (format "%smermaid\nflowchart LR\nA --> B\n%s" fence fence)
-        (should markdown-ts-appear-mermaid--objects)
+        (should markdown-ts-appear-diagram--objects)
         (should-not markdown-ts-appear-mermaid-test--jobs)
         (markdown-ts-appear-stop)
         (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))
-        (should (equal (nth 2 (car markdown-ts-appear-mermaid--job)) "flowchart LR\nA --> B\n"))
+        (should (equal (nth 2 (car markdown-ts-appear-diagram--job)) "flowchart LR\nA --> B\n"))
         (markdown-ts-appear-mermaid-test--deliver)
         (should (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))))))
 
-(ert-deftest markdown-ts-appear-mermaid-test-missing-dependencies-preserve-source ()
-  (dolist (missing '(executable-find image-type-available-p))
-    (markdown-ts-appear-mermaid-test--deferred
-      (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
-        (markdown-ts-appear-mode -1)
-        (cl-letf (((symbol-function missing) (lambda (&rest _) nil)))
-          (should-error (markdown-ts-appear-mode 1) :type 'user-error))
-        (should (equal (buffer-string) markdown-ts-appear-mermaid-test--diagram))
-        (should-not markdown-ts-appear-mermaid--objects)
-        (should-not (memq #'markdown-ts-appear-mermaid--refresh post-command-hook))))))
-
-(ert-deftest markdown-ts-appear-mermaid-test-function-command ()
-  (dolist (result '(svg callback-error signal))
-    (markdown-ts-appear-mermaid-test--isolated
-      (let* (calls callback
-             (markdown-ts-appear-mermaid-test--command
-              (lambda (code theme done)
-                (push (list code theme) calls)
-                (setq callback done)
-                (when (eq result 'signal) (error "Renderer failed")))))
-        (cl-letf (((symbol-function 'executable-find) #'ignore)
-                  ((symbol-function 'image-type-available-p) (lambda (_) t))
-                  ((symbol-function 'display-images-p) (lambda (&rest _) t)))
-          (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
-            (let ((source (car markdown-ts-appear-mermaid--objects)))
-              (should (equal (mapcar #'car calls) '("flowchart LR\nA --> B\n")))
-              (should (member (cadar calls) '("default" "dark")))
-              (pcase result
-                ('svg (funcall callback markdown-ts-appear-mermaid-test--svg))
-                ('callback-error (funcall callback nil "Bad diagram")))
-              (should-not markdown-ts-appear-mermaid--job)
-              (if (eq result 'svg)
-                  (progn
-                    (should (equal (plist-get (cdr (overlay-get source 'markdown-ts-appear-mermaid--image))
-                                              :data)
-                                   markdown-ts-appear-mermaid-test--svg))
-                    (should (overlay-get (markdown-ts-appear-mermaid-test--view) 'display)))
-                (should (equal (overlay-get source 'markdown-ts-appear-mermaid--error)
-                               (if (eq result 'signal) "Renderer failed" "Bad diagram")))
-                (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display)))
-              (should (= (length calls) 1)))))))))
+(ert-deftest markdown-ts-appear-mermaid-test-missing-svg-preserves-source ()
+  (markdown-ts-appear-mermaid-test--deferred
+    (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
+      (markdown-ts-appear-mode -1)
+      (cl-letf (((symbol-function 'image-type-available-p) (lambda (&rest _) nil)))
+        (should-error (markdown-ts-appear-mode 1) :type 'user-error))
+      (should (equal (buffer-string) markdown-ts-appear-mermaid-test--diagram))
+      (should-not markdown-ts-appear-diagram--objects)
+      (should-not (memq #'markdown-ts-appear-diagram--refresh post-command-hook)))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-gui-defers-offscreen-diagrams ()
   (skip-unless (display-graphic-p))
@@ -419,19 +390,19 @@
         (concat (apply #'concat (make-list 100 "Filler paragraph.\n\n"))
                 markdown-ts-appear-mermaid-test--diagram)
       (markdown-ts-appear-mode -1)
-      (setq markdown-ts-appear-mermaid--job nil
-            markdown-ts-appear-mermaid--queue nil
+      (setq markdown-ts-appear-diagram--job nil
+            markdown-ts-appear-diagram--queue nil
             markdown-ts-appear-mermaid-test--jobs nil)
       (goto-char (point-min))
       (set-window-start nil (point-min))
       (redisplay t)
       (markdown-ts-appear-mode 1)
-      (should markdown-ts-appear-mermaid--objects)
+      (should markdown-ts-appear-diagram--objects)
       (should-not markdown-ts-appear-mermaid-test--jobs)
-      (goto-char (overlay-start (car markdown-ts-appear-mermaid--objects)))
+      (goto-char (overlay-start (car markdown-ts-appear-diagram--objects)))
       (set-window-start nil (point))
       (markdown-ts-appear-stop)
-      (markdown-ts-appear-mermaid--invalidate)
+      (markdown-ts-appear-diagram--invalidate)
       (should (= (length markdown-ts-appear-mermaid-test--jobs) 1)))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-gui-render-exposes-next-diagram ()
@@ -444,8 +415,8 @@
                   (apply #'concat (make-list 60 "%% A comment\n"))
                   "A --> B\n```\n\n" markdown-ts-appear-mermaid-test--diagram)
         (markdown-ts-appear-mode -1)
-        (setq markdown-ts-appear-mermaid--job nil
-              markdown-ts-appear-mermaid--queue nil
+        (setq markdown-ts-appear-diagram--job nil
+              markdown-ts-appear-diagram--queue nil
               markdown-ts-appear-mermaid-test--jobs nil)
         (goto-char (point-min))
         (set-window-start nil (point-min))
@@ -466,8 +437,8 @@
       (markdown-ts-appear-mermaid-test--buffer
           "```mermaid\nflowchart LR\nA[开始] --> B[完成]\n```\n\nAfter\n"
         (markdown-ts-appear-mermaid-test--wait)
-        (let* ((source (car markdown-ts-appear-mermaid--objects))
-               (image (overlay-get source 'markdown-ts-appear-mermaid--image))
+        (let* ((source (car markdown-ts-appear-diagram--objects))
+               (image (overlay-get source 'markdown-ts-appear-diagram--image))
                (svg (plist-get (cdr image) :data)))
           (should image)
           (should (string-match-p "开始" svg))
@@ -477,8 +448,8 @@
           (markdown-ts-appear-start)
           (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
           (markdown-ts-appear-stop)
-          (should (eq image (overlay-get source 'markdown-ts-appear-mermaid--image)))
-          (should-not markdown-ts-appear-mermaid--job)
+          (should (eq image (overlay-get source 'markdown-ts-appear-diagram--image)))
+          (should-not markdown-ts-appear-diagram--job)
           (should-not (buffer-modified-p)))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-real-cli-error ()
@@ -488,8 +459,8 @@
       (markdown-ts-appear-mermaid-test--buffer
           "```mermaid\nthis is not a diagram\n```\n\nAfter\n"
         (markdown-ts-appear-mermaid-test--wait)
-        (should (overlay-get (car markdown-ts-appear-mermaid--objects)
-                             'markdown-ts-appear-mermaid--error))
+        (should (overlay-get (car markdown-ts-appear-diagram--objects)
+                             'markdown-ts-appear-diagram--error))
         (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
         (should-not (buffer-modified-p))))))
 
@@ -498,11 +469,14 @@
   (markdown-ts-appear-mermaid-test--isolated
     (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t)))
       (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
-        (let* ((process markdown-ts-appear-mermaid--process)
+        (let* ((process (get-process "markdown-ts-appear-diagram-mmdc"))
                (log (process-buffer process)))
           (should (process-live-p process))
           (kill-buffer (current-buffer))
-          (markdown-ts-appear-mermaid-test--wait)
+          (should-not markdown-ts-appear-diagram--job)
+          (let ((deadline (+ (float-time) 10)))
+            (while (and (process-live-p process) (< (float-time) deadline))
+              (accept-process-output process 0.05)))
           (should-not (process-live-p process))
           (should-not (buffer-live-p log)))))))
 
@@ -512,7 +486,7 @@
     (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
       (markdown-ts-appear-mermaid-test--deliver)
       (redisplay t)
-      (let* ((source (car markdown-ts-appear-mermaid--objects))
+      (let* ((source (car markdown-ts-appear-diagram--objects))
              (view (markdown-ts-appear-mermaid-test--view))
              (image (overlay-get view 'display))
              (height (plist-get (cdr image) :max-height)))
@@ -533,38 +507,38 @@
   (skip-unless (display-graphic-p))
   (markdown-ts-appear-mermaid-test--deferred
     (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
-      (let ((markdown-ts-appear-mermaid-size 'source)
+      (let ((markdown-ts-appear-diagram-size 'source)
             (markdown-ts-appear-mermaid-test--svg
              "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='16'><rect width='32' height='16' fill='blue'/></svg>"))
         (markdown-ts-appear-mermaid-test--deliver)
         (let ((view (markdown-ts-appear-mermaid-test--view)))
           (dolist (size '(source 120))
-            (setopt markdown-ts-appear-mermaid-size size)
+            (setopt markdown-ts-appear-diagram-size size)
             (should (equal (image-size (overlay-get view 'display) t) '(32 . 16)))
             (should-not (overlay-get view 'after-string))))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-gui-size-option-updates-cached-preview ()
   (skip-unless (display-graphic-p))
   (markdown-ts-appear-mermaid-test--deferred
-    (let ((markdown-ts-appear-mermaid-size 'source)
+    (let ((markdown-ts-appear-diagram-size 'source)
           (markdown-ts-image-max-width 120)
           (markdown-ts-appear-mermaid-test--svg
            "<svg xmlns='http://www.w3.org/2000/svg' width='240' height='960'><rect width='240' height='960' fill='blue'/></svg>"))
       (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
         (markdown-ts-appear-mermaid-test--deliver)
-        (let* ((source (car markdown-ts-appear-mermaid--objects))
+        (let* ((source (car markdown-ts-appear-diagram--objects))
                (view (markdown-ts-appear-mermaid-test--view))
-               (image (overlay-get source 'markdown-ts-appear-mermaid--image))
+               (image (overlay-get source 'markdown-ts-appear-diagram--image))
                (preview (overlay-get view 'display))
                (height (image-property preview :max-height)))
           (should (< height 480))
-          (cl-letf (((symbol-function 'markdown-ts-appear-mermaid--source-height)
+          (cl-letf (((symbol-function 'markdown-ts-appear-diagram--source-height)
                      (lambda (&rest _) (ert-fail "Unnecessary source measurement"))))
             ;; The width matches the default limit; only the sizing mode changes.
-            (setopt markdown-ts-appear-mermaid-size 120)
+            (setopt markdown-ts-appear-diagram-size 120)
             (should-not (image-property (overlay-get view 'display) :max-height))
             (should (equal (image-size (overlay-get view 'display) t) '(120 . 480)))
-            (setopt markdown-ts-appear-mermaid-size 60)
+            (setopt markdown-ts-appear-diagram-size 60)
             (should (equal (image-size (overlay-get view 'display) t) '(60 . 240)))
             (goto-char (+ 12 (overlay-start source)))
             (markdown-ts-appear-start)
@@ -572,9 +546,9 @@
             (should-not (overlay-get view 'after-string))
             (markdown-ts-appear-stop)
             (should (equal (image-size (overlay-get view 'display) t) '(60 . 240)))
-            (setopt markdown-ts-appear-mermaid-size 'source)
+            (setopt markdown-ts-appear-diagram-size 'source)
             (should (equal (overlay-get view 'display) preview)))
-          (should (eq (overlay-get source 'markdown-ts-appear-mermaid--image) image))
+          (should (eq (overlay-get source 'markdown-ts-appear-diagram--image) image))
           (should-not (image-property image :max-width))
           (should-not (image-property image :max-height))
           (should (= (length markdown-ts-appear-mermaid-test--jobs) 1)))))))
@@ -594,9 +568,9 @@
         (delete-other-windows)
         (let ((other (split-window-right -25)) heights)
           (set-window-buffer other (current-buffer))
-          (markdown-ts-appear-mermaid--invalidate)
-          (let ((source (car markdown-ts-appear-mermaid--objects)))
-            (dolist (view (overlay-get source 'markdown-ts-appear-mermaid--views))
+          (markdown-ts-appear-diagram--invalidate)
+          (let ((source (car markdown-ts-appear-diagram--objects)))
+            (dolist (view (overlay-get source 'markdown-ts-appear-diagram--views))
               (let* ((window (overlay-get view 'window))
                      (image (overlay-get view 'display))
                      (limit (plist-get (cdr image) :max-height)))
@@ -605,9 +579,9 @@
                 (should (<= (cdr (image-size image t (window-frame window))) limit))))
             (goto-char (+ 12 (overlay-start source)))
             (markdown-ts-appear-start)
-            (dolist (view (overlay-get source 'markdown-ts-appear-mermaid--views))
+            (dolist (view (overlay-get source 'markdown-ts-appear-diagram--views))
               (let ((window (overlay-get view 'window)))
-                (should (= (image-property (overlay-get view 'markdown-ts-appear-mermaid--image) :max-height)
+                (should (= (image-property (overlay-get view 'markdown-ts-appear-diagram--image) :max-height)
                            (cdr (window-text-pixel-size window (overlay-start source) (overlay-end source)))))))
             (should-not (= (car heights) (cadr heights))))
           (should (= (length markdown-ts-appear-mermaid-test--jobs) 1)))))))
@@ -629,9 +603,9 @@
                         tab-width 2
                         display-line-numbers (eq change 'numbers-width))
             (markdown-ts-appear-mermaid-test--deliver)
-            (let* ((source (car markdown-ts-appear-mermaid--objects))
+            (let* ((source (car markdown-ts-appear-diagram--objects))
                    (view (seq-find (lambda (view) (eq (overlay-get view 'window) other))
-                                   (overlay-get source 'markdown-ts-appear-mermaid--views)))
+                                   (overlay-get source 'markdown-ts-appear-diagram--views)))
                    (before (image-property (overlay-get view 'display) :max-height)))
               (pcase change
                 ('tabs (setq-local tab-width 16))
@@ -639,7 +613,7 @@
                 ('hscroll (set-window-hscroll other 4))
                 ('numbers (setq-local display-line-numbers t))
                 ('numbers-width (setq-local display-line-numbers-width 10)))
-              (markdown-ts-appear-mermaid--refresh)
+              (markdown-ts-appear-diagram--refresh)
               (let ((height (image-property (overlay-get view 'display) :max-height)))
                 (goto-char (+ 12 (overlay-start source)))
                 (markdown-ts-appear-start)
@@ -657,11 +631,11 @@
       (let* ((view (markdown-ts-appear-mermaid-test--view))
              (height (plist-get (cdr (overlay-get view 'display)) :max-height)))
         (text-scale-increase 2)
-        (markdown-ts-appear-mermaid--refresh)
+        (markdown-ts-appear-diagram--refresh)
         (let ((scaled (plist-get (cdr (overlay-get view 'display)) :max-height)))
           (should (> scaled height))
           (setq-local line-spacing 5)
-          (markdown-ts-appear-mermaid--refresh)
+          (markdown-ts-appear-diagram--refresh)
           (should (> (plist-get (cdr (overlay-get view 'display)) :max-height) scaled)))
         (should (= (length markdown-ts-appear-mermaid-test--jobs) 1))))))
 
@@ -683,9 +657,9 @@
                          (when (equal (plist-get (cdr spec) :data) markdown-ts-appear-mermaid-test--svg)
                            (ert-fail "Resizing eagerly measured a diagram"))
                          (apply original spec args))))
-              (markdown-ts-appear-mermaid--invalidate)))
-          (let ((views (overlay-get (car markdown-ts-appear-mermaid--objects)
-                                     'markdown-ts-appear-mermaid--views)))
+              (markdown-ts-appear-diagram--invalidate)))
+          (let ((views (overlay-get (car markdown-ts-appear-diagram--objects)
+                                     'markdown-ts-appear-diagram--views)))
             (should (= (length views) 2))
             (dolist (view views)
               (let* ((window (overlay-get view 'window))
@@ -694,9 +668,9 @@
                 (should (= (plist-get (cdr image) :max-width) (window-body-width window t)))
                 (should (<= (car size) (window-body-width window t)))))
             (delete-window other)
-            (markdown-ts-appear-mermaid--invalidate)
-            (should (= (length (overlay-get (car markdown-ts-appear-mermaid--objects)
-                                            'markdown-ts-appear-mermaid--views)) 1))))))))
+            (markdown-ts-appear-diagram--invalidate)
+            (should (= (length (overlay-get (car markdown-ts-appear-diagram--objects)
+                                            'markdown-ts-appear-diagram--views)) 1))))))))
 
 (ert-deftest markdown-ts-appear-mermaid-test-gui-evil-edit-and-navigation ()
   (skip-unless (and (display-graphic-p) (require 'evil nil t)))
@@ -719,7 +693,7 @@
                 (set-window-start nil (point-min))
                 (redisplay t)
                 (execute-kbd-macro "jj")
-                (let* ((source (car markdown-ts-appear-mermaid--objects))
+                (let* ((source (car markdown-ts-appear-diagram--objects))
                        (view (markdown-ts-appear-mermaid-test--view)))
                   (should (<= (overlay-start source) (point)))
                   (should (<= (point) (overlay-end source)))

@@ -17,7 +17,8 @@
   (dolist (file '("markdown-ts-appear-test.el" "markdown-ts-appear-compat-test.el"
                   "markdown-ts-appear-math-test.el" "markdown-ts-appear-table-test.el"
                   "markdown-ts-appear-table-navigation-test.el"
-                  "markdown-ts-appear-image-test.el" "markdown-ts-appear-mermaid-test.el"))
+                  "markdown-ts-appear-image-test.el" "markdown-ts-appear-mermaid-test.el"
+                  "markdown-ts-appear-diagram-test.el"))
     (load (expand-file-name file directory) nil t)))
 
 (defun markdown-ts-appear-run-tests ()

@@ -80,13 +80,13 @@
   (with-temp-buffer
     (insert "Ordinary prose.\n\n")
     (dotimes (_ n) (insert "```mermaid\ngraph TD; A-->B\n```\n\n"))
-    (let ((markdown-ts-appear-enable-mermaid-preview t)
-          (scans 0) (scan (symbol-function 'markdown-ts-appear-mermaid--scan)))
+    (let ((markdown-ts-appear-diagram-renderers '(("mermaid" . markdown-ts-appear-diagram-mmdc)))
+          (scans 0) (scan (symbol-function 'markdown-ts-appear-diagram--scan)))
       (markdown-ts-mode)
       (goto-char (point-min))
       (markdown-ts-appear-mode 1)
       (unwind-protect
-          (cl-letf (((symbol-function 'markdown-ts-appear-mermaid--scan)
+          (cl-letf (((symbol-function 'markdown-ts-appear-diagram--scan)
                      (lambda (&rest args) (cl-incf scans) (apply scan args))))
             (princ (format "diagrams=%d prose-edit/10=%S " n
                            (benchmark-run 10

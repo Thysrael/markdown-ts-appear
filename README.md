@@ -21,7 +21,7 @@ rendered appearance when point leaves.  This minor mode extends the built-in
 `markdown-ts-mode` without changing buffer text.
 
 Optional features include link icons, code fences, quote markers, callout
-labels, width-aware table views, and MathJax and Mermaid previews.
+labels, width-aware table views, and MathJax and diagram previews.
 
 ## Requirements
 
@@ -29,8 +29,9 @@ labels, width-aware table views, and MathJax and Mermaid previews.
 - The `markdown` and `markdown-inline` grammars.
 - Math (optional): the `mathjax` package, Node.js, and an Emacs build with SVG
   image support.
-- Mermaid (optional): [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)
-  (`mmdc`) with its browser runtime, and SVG image support.
+- Diagrams (optional): SVG image support and a registered renderer. The built-in
+  Mermaid renderer uses [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)
+  (`mmdc`) with its browser runtime.
 
 ## Installation
 
@@ -55,7 +56,7 @@ Or install the latest Git revision:
 
 ## Optional previews
 
-Math and Mermaid previews are disabled by default. Both require an Emacs build
+Math and diagram previews are disabled by default. Both require an Emacs build
 with SVG image support.
 
 ### Math
@@ -73,46 +74,32 @@ Install MathJax from MELPA and enable previews:
 Install [Node.js](https://nodejs.org/) separately; the Emacs package does not
 install its runtime.
 
-### Mermaid
+### Diagrams
 
 Install [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli) and its browser
 runtime, then enable:
 
 ```emacs-lisp
-(setopt markdown-ts-appear-enable-mermaid-preview t)
+(setopt markdown-ts-appear-diagram-renderers
+        '(("mermaid" . markdown-ts-appear-diagram-mmdc)))
 ```
 
 Ensure `mmdc` can render a diagram on its own.  Puppeteer's
 `PUPPETEER_EXECUTABLE_PATH` environment variable can select an existing Chrome
 installation.  No additional Emacs package is required.
 
-To render elsewhere, such as through a [Kroki](https://kroki.io/) server, set
-`markdown-ts-appear-mermaid-command` to a function instead of an executable:
+Register other SVG rendering functions with `markdown-ts-appear-diagram-renderers`.
+Each registration enables previews for that fenced-block language. A renderer
+receives `(LANGUAGE CODE THEME CALLBACK)` and calls the callback with SVG text,
+or `nil` and an error message. It may return a zero-argument cancellation
+function. See the option's docstring for the full contract.
 
-```emacs-lisp
-(defun my/mermaid-kroki (code theme callback)
-  (require 'url)
-  (let ((url-request-method "POST")
-        (url-request-extra-headers '(("Content-Type" . "text/plain")))
-        (url-request-data (encode-coding-string code 'utf-8)))
-    (url-retrieve
-     (format "https://kroki.io/mermaid/svg?theme=%s&html-labels=false" theme)
-     (lambda (status)
-       (let ((error (plist-get status :error))
-             (body (and url-http-end-of-headers
-                        (decode-coding-string
-                         (buffer-substring-no-properties
-                          (1+ url-http-end-of-headers) (point-max))
-                         'utf-8))))
-         (kill-buffer)
-         (if (and body (not error))
-             (funcall callback body)
-           (funcall callback nil (cond (body (string-trim body))
-                                       (error (error-message-string error)))))))
-     nil t t)))
-
-(setopt markdown-ts-appear-mermaid-command #'my/mermaid-kroki)
-```
+To migrate, replace `markdown-ts-appear-enable-mermaid-preview` with the
+registration above and rename `markdown-ts-appear-mermaid-size` to
+`markdown-ts-appear-diagram-size`. For a custom executable previously set through
+`markdown-ts-appear-mermaid-command`, register a wrapper that passes its path as
+the optional fifth argument to `markdown-ts-appear-diagram-mmdc`. The old options
+are no longer supported.
 
 ## Configuration
 
@@ -134,12 +121,11 @@ faces.  See `C-h v` and `M-x describe-face` for full documentation.
 | `markdown-ts-appear-table-zebra-stripe` | `t` | Shade every second data row in `wrapped` tables. |
 | `markdown-ts-appear-table-wrap-resize-delay` | `0.2` | Seconds to debounce `wrapped` table resize rendering. |
 | `markdown-ts-appear-enable-math-preview` | `nil` | `t` enables asynchronous math previews. |
-| `markdown-ts-appear-enable-mermaid-preview` | `nil` | `t` previews unedited `mermaid` fenced blocks. |
-| `markdown-ts-appear-mermaid-command` | `"mmdc"` | Mermaid CLI executable, or a function `(CODE THEME CALLBACK)` that calls `CALLBACK` with the SVG text, or with `nil` and an error message. |
-| `markdown-ts-appear-mermaid-size` | `source` | `source`: fit source height; positive integer: limit only width, in pixels. |
+| `markdown-ts-appear-diagram-renderers` | `nil` | Language-to-function alist, e.g. `(("mermaid" . markdown-ts-appear-diagram-mmdc))`; registrations enable previews. |
+| `markdown-ts-appear-diagram-size` | `source` | `source`: fit source height; positive integer: limit only width, in pixels. |
 
 Visual options applied through `setopt` or Customize update active buffers.
-Re-enable `markdown-ts-appear-mode` after changing either preview-enable option.
+Re-enable `markdown-ts-appear-mode` after changing the math preview-enable option.
 
 ### Faces
 
@@ -208,7 +194,7 @@ integration, so no extra configuration is needed if you use it.  Otherwise:
   restores access to all of its source.
 - Unchanged formulas reuse their previews.  Standalone display math is centered;
   inline math stays in the text.
-- Mermaid renders visible, unedited blocks asynchronously, one job at a time.
+- Diagrams render visible, unedited blocks through a shared queue, one job at a time.
   Identical diagrams share cached images; failed diagrams keep their source,
   with details available on hover.  Diagrams are only scaled down, preserving
   their aspect ratio, to fit the code block's displayed height by default, or

@@ -43,7 +43,7 @@
 (require 'subr-x)
 (require 'markdown-ts-appear-image)
 (require 'markdown-ts-appear-math)
-(require 'markdown-ts-appear-mermaid)
+(require 'markdown-ts-appear-diagram)
 
 ;;; Options and faces
 
@@ -58,22 +58,22 @@ The backend is loaded only when this option is enabled for appear mode.
 Re-enable `markdown-ts-appear-mode' after changing this option."
   :type 'boolean)
 
-(defcustom markdown-ts-appear-enable-mermaid-preview nil
-  "Whether to preview unedited Mermaid fenced blocks as SVG diagrams.
-Install the optional Mermaid CLI (mmdc) separately.
-Re-enable `markdown-ts-appear-mode' after changing this option."
-  :type 'boolean)
+(defcustom markdown-ts-appear-diagram-renderers nil
+  "Alist mapping fenced-block language names to SVG rendering functions.
+Registering a language enables its previews.  Names are case-insensitive.
+Each function receives LANGUAGE, CODE, THEME and CALLBACK.  THEME is
+\"dark\" or \"default\".  Call CALLBACK once with SVG text, or nil and an
+error message; the callback may run synchronously or asynchronously.
+A renderer may return a zero-argument cancellation function.  Late results
+from retired jobs are ignored.  Renderers should provide Emacs-compatible
+SVG without HTML foreignObject labels or costly shadow filters.
+Use `markdown-ts-appear-diagram-mmdc' to render Mermaid with its CLI."
+  :type '(alist :key-type string :value-type function)
+  :initialize #'custom-initialize-default
+  :set #'markdown-ts-appear--set-render-option)
 
-(defcustom markdown-ts-appear-mermaid-command "mmdc"
-  "Mermaid CLI executable or function used to render diagrams asynchronously.
-A function is called with the diagram CODE, the Mermaid THEME name and a
-CALLBACK.  It must call CALLBACK once, possibly later, with the SVG text,
-or with nil and an error message.  Emacs cannot display HTML labels, so the
-SVG should not rely on foreignObject."
-  :type '(choice (string :tag "Executable") (function :tag "Function")))
-
-(defcustom markdown-ts-appear-mermaid-size 'source
-  "How to size Mermaid previews, preserving aspect ratio without enlarging.
+(defcustom markdown-ts-appear-diagram-size 'source
+  "How to size diagram previews, preserving aspect ratio without enlarging.
 The default `source' limits height to the code block's displayed height
 and width to `markdown-ts-image-max-width'.
 A positive integer limits only the width, in pixels."
@@ -1191,8 +1191,12 @@ at most one following space or tab and are not clipped to START or LIMIT."
       (when (and (markdown-ts-appear--active-p)
                  (not (local-variable-p option)))
         (cond
-         ((eq option 'markdown-ts-appear-mermaid-size)
-          (markdown-ts-appear-mermaid--refresh))
+         ((eq option 'markdown-ts-appear-diagram-size)
+          (markdown-ts-appear-diagram--refresh))
+         ((eq option 'markdown-ts-appear-diagram-renderers)
+          (markdown-ts-appear-diagram--teardown)
+          (when markdown-ts-appear-diagram-renderers
+            (markdown-ts-appear-diagram--setup)))
          ((eq option 'markdown-ts-appear-table-zebra-stripe)
           (markdown-ts-appear-table--refresh-stripes))
          (t
@@ -1220,8 +1224,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
       (when (markdown-ts-appear--active-p)
         (when markdown-ts-appear-render-callouts
           (without-restriction (font-lock-flush)))
-        (when (memq #'markdown-ts-appear-mermaid--refresh post-command-hook)
-          (run-at-time 0 nil #'markdown-ts-appear-mermaid--refresh-buffer buffer))))))
+        (when (memq #'markdown-ts-appear-diagram--refresh post-command-hook)
+          (run-at-time 0 nil #'markdown-ts-appear-diagram--refresh-buffer buffer))))))
 
 ;; Folding changes overlays, not text, so renderers need this notification.
 ;; Obsoleted in 29.1 as a presumed lazy-lock-only hook; no replacement yet.
@@ -1323,7 +1327,7 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (setq markdown-ts-appear-mode nil
           markdown-ts-appear--region nil)
     (markdown-ts-appear-image--detach)
-    (markdown-ts-appear-mermaid--detach)
+    (markdown-ts-appear-diagram--detach)
     (markdown-ts-appear-table--detach)
     (setq markdown-ts-appear-math--objects nil)
     (markdown-ts-appear-math--teardown)
@@ -1364,14 +1368,14 @@ Indirect buffers are otherwise unsupported and are not synchronized."
   (markdown-ts-appear-table--setup)
   (when markdown-ts-appear-enable-math-preview
     (markdown-ts-appear-math--setup))
-  (when markdown-ts-appear-enable-mermaid-preview
-    (markdown-ts-appear-mermaid--setup)))
+  (when markdown-ts-appear-diagram-renderers
+    (markdown-ts-appear-diagram--setup)))
 
 (defun markdown-ts-appear--disable-buffer ()
   "Remove Markdown TS Appear integration from the current buffer."
   (markdown-ts-appear--remove-buffer-hooks)
   (markdown-ts-appear-image--teardown)
-  (markdown-ts-appear-mermaid--teardown)
+  (markdown-ts-appear-diagram--teardown)
   (markdown-ts-appear-math--teardown)
   (markdown-ts-appear-table--teardown)
   (markdown-ts-appear-stop)

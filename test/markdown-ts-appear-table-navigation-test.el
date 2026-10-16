@@ -23,7 +23,7 @@
      (skip-unless (treesit-ready-p '(markdown markdown-inline)))
      (when ,evil (skip-unless (require 'evil nil t)))
      (let ((markdown-ts-appear-enable-math-preview nil)
-           (markdown-ts-appear-enable-mermaid-preview nil)
+           (markdown-ts-appear-diagram-renderers nil)
            (markdown-ts-inline-images nil)
            (evil-mode-buffers nil))
        (save-window-excursion
