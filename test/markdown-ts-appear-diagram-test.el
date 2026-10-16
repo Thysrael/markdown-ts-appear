@@ -21,7 +21,11 @@
          (markdown-ts-appear-enable-math-preview nil)
          (markdown-ts-inline-images nil))
      (cl-letf (((symbol-function 'image-type-available-p) (lambda (_) t))
-               ((symbol-function 'display-images-p) (lambda (&rest _) t)))
+               ((symbol-function 'display-images-p) (lambda (&rest _) t))
+               ;; Lifecycle checks do not require a compiled SVG backend.
+               ((symbol-function 'create-image)
+                (lambda (data type _data-p &rest properties)
+                  (append (list 'image :type type :data data) properties))))
        (save-window-excursion ,@body))))
 
 (defmacro markdown-ts-appear-diagram-test--buffer (text &rest body)
@@ -60,7 +64,7 @@
                    (should-not (equal command "mmdc"))
                    (funcall find-executable command remote))))
         (markdown-ts-appear-diagram-test--buffer
-            "```D2\nx -> y\n```\n\n```dot\nx -> y\n```\n\n```python\nx -> y\n```\n\nAfter\n"
+            "```D2\nx -> y\n```\n\n```dot\nx -> y\n```\n\n```text\nx -> y\n```\n\nAfter\n"
           (should (= 2 (length calls)))
           (should (equal (sort (mapcar #'car calls) #'string-lessp) '("d2" "dot")))
           (should (cl-every (lambda (call) (equal (cadr call) "x -> y\n")) calls))
