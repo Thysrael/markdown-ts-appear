@@ -148,7 +148,7 @@ jobs:
           python3 -B -m unittest discover -s test -p 'test_*.py'
           python3 test/table-redisplay.py
 
-      # Experimental dependency checks may fail on known upstream issues (#7).
+      # Retain the upstream asynchronous regressions reported in #7.
       - name: Check upstream math preview lifecycle
         run: |
           emacs --batch -Q \

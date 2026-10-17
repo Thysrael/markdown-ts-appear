@@ -53,7 +53,7 @@
 
 (defcustom markdown-ts-appear-enable-math-preview nil
   "Whether to enable the optional latex-to-svg Markdown adaptor.
-Install `latex-to-svg-for-markdown' with its span/reveal APIs.
+Install `latex-to-svg-for-markdown' 0.22.2 or later.
 Its options select the engine, preamble and preview appearance.
 An independently enabled adaptor also follows appear's reveal policy.
 Re-enable `markdown-ts-appear-mode' after changing this option."
