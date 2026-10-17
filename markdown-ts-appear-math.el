@@ -131,12 +131,13 @@
   (markdown-ts-appear-math--restore-reveal))
 
 (defun markdown-ts-appear-math--detach ()
-  "Detach inherited math state in an unsupported indirect clone."
-  ;; latex-to-svg 0.22.2 gives a clone its own state before this hook runs,
-  ;; so turning its mode off here leaves the base buffer's work alone.
-  (when (bound-and-true-p latex-to-svg-frontend-mode)
-    (remove-hook 'latex-to-svg-frontend-mode-hook #'markdown-ts-appear-math--sync t)
-    (latex-to-svg-for-markdown-mode -1))
+  "Detach appear's math integration in an unsupported indirect clone.
+The clone keeps the Markdown adaptor and its math previews, so it shows
+the math as the base buffer does: latex-to-svg 0.22.2 gives a clone its
+own previews and keeps them in step with the base buffer.  Appear's part
+is removed and the previous reveal option is restored, since appear no
+longer tracks point in the clone."
+  ;; Not owned in the clone, so the teardown leaves the adaptor on.
   (setq markdown-ts-appear-math--owned nil)
   (markdown-ts-appear-math--teardown))
 

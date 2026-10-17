@@ -320,7 +320,8 @@
           (should-not (overlay-get ov 'display)))))))
 
 (ert-deftest markdown-ts-appear-math-test-clone-preserves-base ()
-  ;; Appear turns the adaptor off in a clone from `clone-indirect-buffer-hook'.
+  ;; Appear detaches itself from a clone in `clone-indirect-buffer-hook'; the
+  ;; clone keeps the adaptor, its own previews and the previous reveal option.
   ;; The base buffer keeps its pending preview whichever mode was turned on
   ;; first, and so whichever function on that hook was added last.
   (dolist (first '(appear math))
@@ -339,8 +340,8 @@
               (markdown-ts-appear-mode 1))
             (markdown-ts-appear-math-test--move 2)
             (should callback)
-            ;; The clone renders and requests `$y$' too before appear turns
-            ;; its adaptor off, so keep the base buffer's callback.
+            ;; The clone renders and requests `$y$' too, so keep the base
+            ;; buffer's callback.
             (let* ((base-callback callback)
                    (preview (car (markdown-ts-appear-math-test--previews)))
                    (last-point latex-to-svg-frontend--last-point)
@@ -349,13 +350,20 @@
                   (progn
                     (with-current-buffer clone
                       (should-not markdown-ts-appear-mode)
-                      (should-not latex-to-svg-frontend-mode))
+                      (should latex-to-svg-frontend-mode)
+                      (should-not (eq latex-to-svg-frontend-reveal
+                                      #'markdown-ts-appear-math--reveal-p)))
                     (should (marker-position last-point))
                     (should (overlay-buffer preview))
                     (should latex-to-svg-frontend-mode)
+                    (should (eq latex-to-svg-frontend-reveal
+                                #'markdown-ts-appear-math--reveal-p))
                     (setq ready t)
                     (funcall base-callback nil)
-                    (should (= 2 (length (markdown-ts-appear-math-test--previews)))))
+                    (should (= 2 (length (markdown-ts-appear-math-test--previews))))
+                    (funcall callback nil)
+                    (with-current-buffer clone
+                      (should (= 2 (length (markdown-ts-appear-math-test--previews))))))
                 (kill-buffer clone)))))))))
 
 (provide 'markdown-ts-appear-math-test)
