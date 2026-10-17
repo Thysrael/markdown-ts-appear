@@ -289,20 +289,30 @@ uses `line-prefix' so its rendered quote markers replace the raw wrap suffix."
   (propertize (concat " " text " ")
               'face (list 'markdown-ts-appear-label face)))
 
-(defun markdown-ts-appear--code-quote-prefix (source)
-  "Render quoted code prefix SOURCE followed by a code block marker."
-  (let ((marker (or markdown-ts-appear-block-quote-marker ">")))
-    (concat
-     (mapconcat
-      (lambda (character)
-        (if (eq character ?>)
-            (propertize
-             marker 'face '(markdown-ts-appear-block-quote-marker
-                            markdown-ts-appear-code-fence-marker))
-          (propertize
-           (string character) 'face 'markdown-ts-appear-code-fence-marker)))
-      source)
-     (propertize "│ " 'face 'markdown-ts-appear-code-fence-marker))))
+(defun markdown-ts-appear--code-block-face (hide-markup)
+  "Return the face of code block content, with HIDE-MARKUP as hiding state."
+  (if hide-markup
+      'markdown-ts-code-block-markup-hidden
+    'markdown-ts-code-block))
+
+(defun markdown-ts-appear--code-quote-prefix (source block-face)
+  "Render quoted code prefix SOURCE followed by a code block marker.
+Append BLOCK-FACE, so the prefix shares the background of the block."
+  (let* ((marker (or markdown-ts-appear-block-quote-marker ">"))
+         (prefix
+          (concat
+           (mapconcat
+            (lambda (character)
+              (if (eq character ?>)
+                  (propertize
+                   marker 'face '(markdown-ts-appear-block-quote-marker
+                                  markdown-ts-appear-code-fence-marker))
+                (propertize
+                 (string character) 'face 'markdown-ts-appear-code-fence-marker)))
+            source)
+           (propertize "│ " 'face 'markdown-ts-appear-code-fence-marker))))
+    (add-face-text-property 0 (length prefix) block-face t prefix)
+    prefix))
 
 ;;; Source bounds and point tracking
 
@@ -875,16 +885,22 @@ at most one following space or tab and are not clipped to START or LIMIT."
                            (line-beginning-position))
                        (treesit-node-end content)))
            (beg (max start body-beg))
-           (end (min limit body-end)))
+           (end (min limit body-end))
+           (block-face
+            (markdown-ts-appear--code-block-face markdown-ts-hide-markup)))
       (when (< beg end)
+        ;; A prefix string does not take the face of the text it precedes,
+        ;; so it gets the block face explicitly, as the fence lines do.
         (if (not (markdown-ts-appear--node-ancestor
                   (treesit-node-parent node) "block_quote"))
             (markdown-ts-appear--decorate-line-prefix
-             beg end "│ " 'markdown-ts-appear-code-fence-marker)
+             beg end "│ " (list 'markdown-ts-appear-code-fence-marker
+                                block-face))
           (let ((wrap-beg (max beg content-beg))
                 (wrap-prefix
                  (markdown-ts-appear--code-quote-prefix
-                  (buffer-substring-no-properties body-beg content-beg))))
+                  (buffer-substring-no-properties body-beg content-beg)
+                  block-face)))
             (when (< wrap-beg end)
               (markdown-ts-appear--decorate-prefix
                wrap-beg end 'wrap-prefix wrap-prefix 'line-prefix)))
@@ -895,7 +911,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
                                marker-beg (1+ marker-beg))))
                 (markdown-ts-appear--decorate
                  marker-beg (min end marker-end)
-                 (markdown-ts-appear--code-quote-prefix "> ") nil)))))))))
+                 (markdown-ts-appear--code-quote-prefix "> " block-face)
+                 nil)))))))))
 
 (defun markdown-ts-appear--callout-background (accent)
   "Return a faint background face derived from ACCENT and the default face."
@@ -982,9 +999,7 @@ at most one following space or tab and are not clipped to START or LIMIT."
                           visible-p)))))
       (apply function node override start limit rest)
       (when (equal type "fenced_code_block_delimiter")
-        (let ((face (if hide-markup-p
-                        'markdown-ts-code-block-markup-hidden
-                      'markdown-ts-code-block)))
+        (let ((face (markdown-ts-appear--code-block-face hide-markup-p)))
           (save-excursion
             (goto-char (treesit-node-start node))
             (let ((beg (max start (line-beginning-position)))

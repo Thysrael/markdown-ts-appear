@@ -1081,6 +1081,19 @@
       (should-not (get-text-property first-line 'line-prefix))
       (should (equal (get-text-property second-line 'line-prefix) "│ ")))))
 
+(ert-deftest markdown-ts-appear-test-code-prefix-has-block-face ()
+  (dolist (case '(("```text\ncontent\n```\n" "content" line-prefix)
+                  ("> ```text\n> content\n> ```\n" "content" wrap-prefix)))
+    (markdown-ts-appear-test--with-buffer (car case)
+      (goto-char (point-min))
+      (search-forward (nth 1 case))
+      (let ((prefix (get-text-property (match-beginning 0) (nth 2 case))))
+        (should (stringp prefix))
+        (dotimes (index (length prefix))
+          (should
+           (memq 'markdown-ts-code-block-markup-hidden
+                 (ensure-list (get-text-property index 'face prefix)))))))))
+
 (ert-deftest markdown-ts-appear-test-renders-code-fence-without-language ()
   (markdown-ts-appear-test--with-buffer "```\ncontent\n```\n"
     (should (equal (get-text-property (point-min) 'display) "╭─"))))
