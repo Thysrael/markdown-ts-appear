@@ -21,10 +21,6 @@
 (defvar markdown-ts-appear-enable-math-preview)
 (defvar markdown-ts-appear--last-point)
 (defvar latex-to-svg-frontend-reveal)
-(defvar latex-to-svg-frontend--last-point)
-(defvar latex-to-svg-frontend--reconcile-timer)
-(defvar latex-to-svg-frontend--initial-render-timer)
-(defvar latex-to-svg-frontend--requests)
 
 (defvar-local markdown-ts-appear-math--owned nil
   "Non-nil when appear enabled the Markdown math adaptor.")
@@ -136,13 +132,9 @@
 
 (defun markdown-ts-appear-math--detach ()
   "Detach inherited math state in an unsupported indirect clone."
-  ;; The frontend has no clone-detach API. Drop the clone's references before
-  ;; teardown so it does not release the base buffer's pending work.
+  ;; latex-to-svg 0.22.2 gives a clone its own state before this hook runs,
+  ;; so turning its mode off here leaves the base buffer's work alone.
   (when (bound-and-true-p latex-to-svg-frontend-mode)
-    (setq-local latex-to-svg-frontend--last-point nil
-                latex-to-svg-frontend--reconcile-timer nil
-                latex-to-svg-frontend--initial-render-timer nil
-                latex-to-svg-frontend--requests nil)
     (remove-hook 'latex-to-svg-frontend-mode-hook #'markdown-ts-appear-math--sync t)
     (latex-to-svg-for-markdown-mode -1))
   (setq markdown-ts-appear-math--owned nil)
