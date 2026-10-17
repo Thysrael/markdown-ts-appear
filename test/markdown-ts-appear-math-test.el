@@ -320,33 +320,43 @@
           (should-not (overlay-get ov 'display)))))))
 
 (ert-deftest markdown-ts-appear-math-test-clone-preserves-base ()
-  (markdown-ts-appear-math-test--buffer "$x$ and $y$\n"
-    (markdown-ts-appear-math-test--rendered
-      (let (ready callback)
-        (cl-letf (((symbol-function 'latex-to-svg-backend)
-                   (lambda (source &rest options)
-                     (if (or ready (equal source "$x$")) 'fake-image
-                       (setq callback (plist-get options :callback))
-                       nil))))
-          (setq markdown-ts-appear-enable-math-preview t)
-          (markdown-ts-appear-mode 1)
-          (markdown-ts-appear-math-test--move 2)
-          (should callback)
-          (let ((preview (car (markdown-ts-appear-math-test--previews)))
-                (last-point latex-to-svg-frontend--last-point)
-                (clone (clone-indirect-buffer " *math-clone*" nil)))
-            (unwind-protect
-                (progn
-                  (with-current-buffer clone
-                    (should-not markdown-ts-appear-mode)
-                    (should-not latex-to-svg-frontend-mode))
-                  (should (marker-position last-point))
-                  (should (overlay-buffer preview))
-                  (should latex-to-svg-frontend-mode)
-                  (setq ready t)
-                  (funcall callback nil)
-                  (should (= 2 (length (markdown-ts-appear-math-test--previews)))))
-              (kill-buffer clone))))))))
+  ;; Appear turns the adaptor off in a clone from `clone-indirect-buffer-hook'.
+  ;; The base buffer keeps its pending preview whichever mode was turned on
+  ;; first, and so whichever function on that hook was added last.
+  (dolist (first '(appear math))
+    (markdown-ts-appear-math-test--buffer "$x$ and $y$\n"
+      (markdown-ts-appear-math-test--rendered
+        (let (ready callback)
+          (cl-letf (((symbol-function 'latex-to-svg-backend)
+                     (lambda (source &rest options)
+                       (if (or ready (equal source "$x$")) 'fake-image
+                         (setq callback (plist-get options :callback))
+                         nil))))
+            (if (eq first 'appear)
+                (progn (setq markdown-ts-appear-enable-math-preview t)
+                       (markdown-ts-appear-mode 1))
+              (latex-to-svg-for-markdown-mode 1)
+              (markdown-ts-appear-mode 1))
+            (markdown-ts-appear-math-test--move 2)
+            (should callback)
+            ;; The clone renders and requests `$y$' too before appear turns
+            ;; its adaptor off, so keep the base buffer's callback.
+            (let* ((base-callback callback)
+                   (preview (car (markdown-ts-appear-math-test--previews)))
+                   (last-point latex-to-svg-frontend--last-point)
+                   (clone (clone-indirect-buffer " *math-clone*" nil)))
+              (unwind-protect
+                  (progn
+                    (with-current-buffer clone
+                      (should-not markdown-ts-appear-mode)
+                      (should-not latex-to-svg-frontend-mode))
+                    (should (marker-position last-point))
+                    (should (overlay-buffer preview))
+                    (should latex-to-svg-frontend-mode)
+                    (setq ready t)
+                    (funcall base-callback nil)
+                    (should (= 2 (length (markdown-ts-appear-math-test--previews)))))
+                (kill-buffer clone)))))))))
 
 (provide 'markdown-ts-appear-math-test)
 ;;; markdown-ts-appear-math-test.el ends here

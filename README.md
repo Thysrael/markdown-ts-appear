@@ -74,7 +74,7 @@ Install the Markdown adaptor from MELPA, then enable previews:
 
 Install the selected engine separately: LaTeX + dvisvgm (default), RaTeX, or
 texres + pdftocairo. See [upstream setup](https://github.com/alberti42/latex-to-svg#engine).
-Requires `latex-to-svg-for-markdown` 0.22.0 or later (on MELPA Stable).
+Requires `latex-to-svg-for-markdown` 0.22.2 or later (on MELPA Stable).
 
 ### Diagrams
 
