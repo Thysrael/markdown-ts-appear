@@ -490,7 +490,10 @@ BLOCK is the Markdown node already found at POS, when available."
              (when-let* ((underline
                           (treesit-search-subtree
                            structural-node "\\`setext_h[12]_underline\\'")))
-               (cons (treesit-node-start underline)
+               (cons (save-excursion
+                       (goto-char (treesit-node-start underline))
+                       (skip-chars-backward " \t\n")
+                       (point))
                      (treesit-node-end underline))))
             ("list_item"
              (when-let* ((marker

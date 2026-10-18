@@ -379,7 +379,7 @@
 (ert-deftest markdown-ts-appear-test-structural-node-bounds-matrix ()
   (dolist (case
            '(("# Heading\n" 1 "# " "atx_heading")
-             ("Title\n=====\n" 7 "=====" "setext_heading")
+             ("Title\n=====\n" 7 "\n=====" "setext_heading")
              ("- item\n" 1 "- " "list_item")
              ("- [ ] todo\n" 3 "[ ]" "task_list_marker_unchecked")
              ("- [x] done\n" 3 "[x]" "task_list_marker_checked")
@@ -608,6 +608,23 @@
     (font-lock-ensure)
     (should-not (text-property-any
 		 (point-min) (point-max) 'line-height 0))))
+
+;; With `markdown-ts-hide-markup', markdown-ts-mode also hides the end of
+;; the heading line; revealing only the underline drew it on that line.
+(ert-deftest markdown-ts-appear-test-reveals-setext-line-end ()
+  (markdown-ts-appear-test--with-buffer "Title  \n=====\n\nText\n"
+    (let ((markdown-ts-hide-markup t))
+      (font-lock-flush)
+      (font-lock-ensure)
+      (should (get-text-property 6 'invisible))
+      (dolist (position '(3 10))
+        (goto-char position)
+        (markdown-ts-appear--update)
+        (should-not (text-property-not-all 6 14 'invisible nil)))
+      (goto-char (point-max))
+      (markdown-ts-appear--update)
+      (should (get-text-property 6 'invisible))
+      (should (get-text-property 10 'invisible)))))
 
 (ert-deftest markdown-ts-appear-test-disable-widens-before-cleanup ()
   (markdown-ts-appear-test--with-buffer "One\n===\n\nTwo\n===\n"
