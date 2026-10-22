@@ -51,6 +51,12 @@
   "Reveal rendered Markdown source at point."
   :group 'markdown-ts)
 
+(defcustom markdown-ts-appear-auto-start t
+  "Start source tracking when `markdown-ts-appear-mode' is enabled.
+Set nil before enabling the mode to let modal editing hooks call
+`markdown-ts-appear-start' and `markdown-ts-appear-stop' instead."
+  :type 'boolean)
+
 (defcustom markdown-ts-appear-enable-math-preview nil
   "Whether to enable the selected optional math renderer.
 See `markdown-ts-appear-math-renderer'.  An independently enabled math mode
@@ -1459,7 +1465,7 @@ Indirect buffers are otherwise unsupported and are not synchronized."
     (markdown-ts-appear--native-set-hide-markup t))
   (without-restriction
     (font-lock-flush (point-min) (point-max)))
-  (markdown-ts-appear-start)
+  (when markdown-ts-appear-auto-start (markdown-ts-appear-start))
   (markdown-ts-appear-table--setup)
   (markdown-ts-appear-math--setup)
   (when markdown-ts-appear-diagram-renderers

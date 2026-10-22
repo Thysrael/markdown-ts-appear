@@ -39,7 +39,8 @@ currently require a blank line after the formula.  Enable before starting
 (declare-function markdown-ts-appear-mathjax-kitty--available-p "markdown-ts-appear-mathjax-kitty" (ov))
 (declare-function markdown-ts-appear-mathjax-kitty--sync "markdown-ts-appear-mathjax-kitty" (ov))
 (declare-function markdown-ts-appear-mathjax-kitty--clear "markdown-ts-appear-mathjax-kitty" (ov))
-(declare-function markdown-ts-appear-mathjax-kitty--repaint "markdown-ts-appear-mathjax-kitty" ())
+(declare-function markdown-ts-appear-mathjax-kitty--enable "markdown-ts-appear-mathjax-kitty" ())
+(declare-function markdown-ts-appear-mathjax-kitty--disable "markdown-ts-appear-mathjax-kitty" ())
 
 (defun markdown-ts-appear-mathjax--set-option (option value)
   "Set OPTION to VALUE and refresh buffers using its default."
@@ -542,7 +543,8 @@ INLINE applies the dollar-closing whitespace/digit checks. Return its start."
 
 (defun markdown-ts-appear-mathjax--delete (ov)
   "Delete OV and its editing decoration."
-  (when (overlay-get ov 'markdown-ts-appear-mathjax-kitty--view)
+  (when (or (overlay-get ov 'markdown-ts-appear-mathjax-kitty--view)
+            (overlay-get ov 'markdown-ts-appear-mathjax-kitty--process))
     (markdown-ts-appear-mathjax-kitty--clear ov))
   (markdown-ts-appear-mathjax--clear-panel ov)
   (overlay-put ov 'markdown-ts-appear-mathjax--pending nil)
@@ -696,8 +698,9 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
                        markdown-ts-appear-mathjax--shown-image markdown-ts-appear-mathjax--rebuild))
       (overlay-put ov property nil))))
 
-(defun markdown-ts-appear-mathjax--source-rows (ov)
-  "Create OV's source edges only initially or after newline changes."
+(defun markdown-ts-appear-mathjax--source-rows (ov &optional terminal)
+  "Create OV's source edges only initially or after newline changes.
+TERMINAL covers newlines for even backgrounds, without GUI stretch-space tails."
   (when (or (not (overlay-get ov 'markdown-ts-appear-mathjax--rows))
             (overlay-get ov 'markdown-ts-appear-mathjax--rebuild))
     (mapc #'delete-overlay (overlay-get ov 'markdown-ts-appear-mathjax--rows))
@@ -705,15 +708,17 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
            (color (or (and (listp box) (plist-get box :color)) (and (stringp box) box)
                       (face-foreground 'shadow nil t)))
            (bar (propertize " " 'display '(space :width (1)) 'face `(:background ,color)))
-           (tail (concat (propertize " " 'cursor t)
-                         (propertize " " 'display '(space :align-to (- right (1)))) bar))
+           (tail (unless terminal
+                   (concat (propertize " " 'cursor t)
+                           (propertize " " 'display '(space :align-to (- right (1)))) bar)))
            (end (overlay-end ov)) rows)
       (save-excursion
         (goto-char (overlay-start ov)) (beginning-of-line)
         (let ((first t) (more t))
           (while more
-            (let* ((beg (point)) (eol (line-end-position)) (row (make-overlay beg eol nil nil t))
-                   (face (if first `((:overline ,color) markdown-ts-appear-mathjax-source)
+            (let* ((beg (point)) (eol (line-end-position))
+                   (row (make-overlay beg (if terminal (min (1+ eol) (point-max)) eol) nil nil t))
+                   (face (if (and first (not terminal)) `((:overline ,color) markdown-ts-appear-mathjax-source)
                            'markdown-ts-appear-mathjax-source))
                    (prefix (or (get-char-property beg 'line-prefix) line-prefix))
                    (wrap (or (get-char-property beg 'wrap-prefix) wrap-prefix))
@@ -726,11 +731,12 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
                              (if (not (cdr pair)) border
                                (concat (if (stringp (cdr pair)) (cdr pair)
                                          (propertize " " 'display (cdr pair))) border))))
-              (let ((edge (if (= beg eol) (propertize (concat bar " " tail) 'line-prefix "" 'wrap-prefix "")
-                            (copy-sequence tail))))
-                (add-face-text-property 0 (length edge) face t edge)
-                (overlay-put row 'markdown-ts-appear-mathjax--tail edge)
-                (overlay-put row 'after-string edge))
+              (unless terminal
+                (let ((edge (if (= beg eol) (propertize (concat bar " " tail) 'line-prefix "" 'wrap-prefix "")
+                              (copy-sequence tail))))
+                  (add-face-text-property 0 (length edge) face t edge)
+                  (overlay-put row 'markdown-ts-appear-mathjax--tail edge)
+                  (overlay-put row 'after-string edge)))
               (push row rows) (setq first nil)
               (if (>= eol end) (setq more nil) (forward-line 1))))))
       (overlay-put ov 'markdown-ts-appear-mathjax--last-row (car rows))
@@ -803,8 +809,12 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
                      (require 'mathjax nil t) (mathjax-available-p))
           (setq markdown-ts-appear-mathjax-mode nil)
           (user-error "MathJax previews require markdown-ts-mode, the mathjax package and Node.js"))
-        (when markdown-ts-appear-mathjax-terminal-preview
-          (require 'markdown-ts-appear-mathjax-kitty))
+        (when (and markdown-ts-appear-mathjax-terminal-preview (not (display-graphic-p)))
+          (condition-case err
+              (progn (require 'markdown-ts-appear-mathjax-kitty)
+                     (markdown-ts-appear-mathjax-kitty--enable))
+            (error (setq markdown-ts-appear-mathjax-mode nil)
+                   (signal (car err) (cdr err)))))
         (font-lock-add-keywords nil '((markdown-ts-appear-mathjax--fontify)) t)
         (dolist (property '(invisible display))
           (unless (memq property font-lock-extra-managed-props)
@@ -838,7 +848,8 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
       (setq font-lock-extra-managed-props (delq property font-lock-extra-managed-props)))
     (setq markdown-ts-appear-mathjax--managed nil)
     (remove-hook 'post-command-hook #'markdown-ts-appear-mathjax--post-command t)
-    (remove-hook 'post-command-hook #'markdown-ts-appear-mathjax-kitty--repaint t)
+    (when (featurep 'markdown-ts-appear-mathjax-kitty)
+      (markdown-ts-appear-mathjax-kitty--disable))
     (remove-hook 'markdown-ts-appear--tracking-change-hook #'markdown-ts-appear-mathjax--post-command t)
     (remove-hook 'after-change-functions #'markdown-ts-appear-mathjax--changed t)
     (when (and (treesit-parser-p treesit-primary-parser)

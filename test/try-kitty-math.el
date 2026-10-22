@@ -10,6 +10,7 @@
 (add-to-list 'load-path (expand-file-name ".." (file-name-directory load-file-name)))
 (require 'markdown-ts-appear)
 (require 'markdown-ts-appear-mathjax-kitty)
+(require 'kitty-graphics)
 (kitty-graphics-mode 1)
 (setopt markdown-ts-appear-enable-math-preview t
         markdown-ts-appear-math-renderer 'mathjax

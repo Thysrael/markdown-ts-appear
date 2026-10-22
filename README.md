@@ -128,6 +128,8 @@ TERM=xterm-256color KITTY_MATH_LOG=/path/to/result.log \
 The check exercises source reveal, below-source idle updates, split windows,
 scrolling, source integrity, cache reuse, and cleanup, then exits.
 For an interactive scratch-buffer demo instead, use `-l test/try-kitty-math.el`.
+See [performance measurements](test/kitty-math-performance.md) for the
+warm-cache benchmark and reproduction command.
 
 ### Diagrams
 
@@ -165,6 +167,7 @@ faces.  See `C-h v` and `M-x describe-face` for full documentation.
 
 | Option | Default | Values and effect |
 | --- | --- | --- |
+| `markdown-ts-appear-auto-start` | `t` | Start source reveal when enabling the mode; `nil` leaves it to `markdown-ts-appear-start` and modal state hooks. |
 | `markdown-ts-appear-heading-bullets` | `nil` | List of strings or characters, e.g. `'("◉" "○")`, cycled by ATX heading level; `nil` keeps normal rendering. |
 | `markdown-ts-appear-link-icon` | `""` | String before ordinary links; empty disables it. |
 | `markdown-ts-appear-image-icon` | `""` | String before image links; empty disables it. |
@@ -214,14 +217,16 @@ to each buffer and are removed when appear mode is disabled.
 integration, so no extra configuration is needed if you use it.  Otherwise:
 
 ```emacs-lisp
+(setopt markdown-ts-appear-auto-start nil)
+
 (defun my/markdown-appear-evil ()
   "Reveal Markdown source only in Evil insert state."
   (if markdown-ts-appear-mode
       (progn
         (add-hook 'evil-insert-state-entry-hook #'markdown-ts-appear-start nil t)
         (add-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop nil t)
-        (unless (eq (bound-and-true-p evil-state) 'insert)
-          (markdown-ts-appear-stop)))
+        (when (eq (bound-and-true-p evil-state) 'insert)
+          (markdown-ts-appear-start)))
     (remove-hook 'evil-insert-state-entry-hook #'markdown-ts-appear-start t)
     (remove-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop t)))
 
@@ -231,14 +236,16 @@ integration, so no extra configuration is needed if you use it.  Otherwise:
 ### Meow
 
 ```emacs-lisp
+(setopt markdown-ts-appear-auto-start nil)
+
 (defun my/markdown-appear-meow ()
   "Reveal Markdown source only in Meow insert state."
   (if markdown-ts-appear-mode
       (progn
         (add-hook 'meow-insert-enter-hook #'markdown-ts-appear-start nil t)
         (add-hook 'meow-insert-exit-hook #'markdown-ts-appear-stop nil t)
-        (unless (bound-and-true-p meow-insert-mode)
-          (markdown-ts-appear-stop)))
+        (when (bound-and-true-p meow-insert-mode)
+          (markdown-ts-appear-start)))
     (remove-hook 'meow-insert-enter-hook #'markdown-ts-appear-start t)
     (remove-hook 'meow-insert-exit-hook #'markdown-ts-appear-stop t)))
 

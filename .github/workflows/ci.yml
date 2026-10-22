@@ -110,6 +110,7 @@ jobs:
             markdown-ts-appear-image.el \
             markdown-ts-appear-math.el \
             markdown-ts-appear-mathjax.el \
+            markdown-ts-appear-mathjax-kitty.el \
             markdown-ts-appear-diagram.el \
             markdown-ts-appear-table.el \
             markdown-ts-appear.el
@@ -125,6 +126,7 @@ jobs:
                             \"markdown-ts-appear-image.el\"
                             \"markdown-ts-appear-math.el\"
                             \"markdown-ts-appear-mathjax.el\"
+                            \"markdown-ts-appear-mathjax-kitty.el\"
                             \"markdown-ts-appear-diagram.el\"
                             \"markdown-ts-appear-table.el\"))
               (find-file file)
@@ -140,6 +142,15 @@ jobs:
           emacs --batch -Q -L . --eval '(progn
             (require (quote markdown-ts-appear))
             (require (quote markdown-ts-appear-mathjax))
+            (require (quote markdown-ts-appear-mathjax-kitty))
+            (when (or (featurep (quote kitty-graphics))
+                      (advice-member-p (quote markdown-ts-appear-mathjax-kitty--redraw)
+                                       (quote redraw-display))
+                      (advice-member-p (quote markdown-ts-appear-mathjax-kitty--position)
+                                       (quote kitty-graphics--overlay-screen-pos))
+                      (advice-member-p (quote markdown-ts-appear-mathjax-kitty--refresh)
+                                       (quote kitty-graphics--refresh-overlay)))
+              (error "Loading the Kitty adapter activated terminal support"))
             (with-temp-buffer
               (insert "| A | B |\n|---|---|\n| $x$ | **text** |\n")
               (markdown-ts-mode)

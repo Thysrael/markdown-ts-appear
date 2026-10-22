@@ -17,6 +17,7 @@
   (dolist (file '("markdown-ts-appear-test.el" "markdown-ts-appear-compat-test.el"
                   "markdown-ts-appear-math-test.el"
                   "markdown-ts-appear-mathjax-independent-test.el"
+                  "markdown-ts-appear-mathjax-kitty-test.el"
                   "markdown-ts-appear-table-test.el"
                   "markdown-ts-appear-table-navigation-test.el"
                   "markdown-ts-appear-table-math-test.el"
