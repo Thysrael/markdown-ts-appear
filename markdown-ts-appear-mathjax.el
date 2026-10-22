@@ -29,6 +29,18 @@
 
 (defvar markdown-ts-appear-mathjax-mode)
 
+(defcustom markdown-ts-appear-mathjax-terminal-preview nil
+  "Use experimental Kitty previews for display and inline formulas.
+Requires `kitty-graphics-mode' in a terminal Emacs session.  Editing previews
+currently require a blank line after the formula.  Enable before starting
+`markdown-ts-appear-mathjax-mode'.  Mixed GUI/TTY views are not supported."
+  :type 'boolean :group 'markdown-ts-appear-mathjax)
+
+(declare-function markdown-ts-appear-mathjax-kitty--available-p "markdown-ts-appear-mathjax-kitty" (ov))
+(declare-function markdown-ts-appear-mathjax-kitty--sync "markdown-ts-appear-mathjax-kitty" (ov))
+(declare-function markdown-ts-appear-mathjax-kitty--clear "markdown-ts-appear-mathjax-kitty" (ov))
+(declare-function markdown-ts-appear-mathjax-kitty--repaint "markdown-ts-appear-mathjax-kitty" ())
+
 (defun markdown-ts-appear-mathjax--set-option (option value)
   "Set OPTION to VALUE and refresh buffers using its default."
   (set-default option value)
@@ -441,6 +453,12 @@ INLINE applies the dollar-closing whitespace/digit checks. Return its start."
 
 (defun markdown-ts-appear-mathjax--sync (ov)
   "Synchronize OV's source/image presentation without compiling."
+  (if (and markdown-ts-appear-mathjax-terminal-preview (not (display-graphic-p)))
+      (markdown-ts-appear-mathjax-kitty--sync ov)
+    (markdown-ts-appear-mathjax--sync-image ov)))
+
+(defun markdown-ts-appear-mathjax--sync-image (ov)
+  "Synchronize OV using the native image display."
   (when (overlay-buffer ov)
     (let* ((editing (markdown-ts-appear-mathjax--editing-p ov))
            (modified (overlay-get ov 'markdown-ts-appear-mathjax--modified))
@@ -467,7 +485,10 @@ INLINE applies the dollar-closing whitespace/digit checks. Return its start."
 (defun markdown-ts-appear-mathjax--request (ov)
   "Request OV's current formula, respecting source-only editing."
   (when (and (overlay-buffer ov) (not (overlay-get ov 'markdown-ts-appear-mathjax--pending))
-             (get-buffer-window (current-buffer) t) (display-images-p)
+             (get-buffer-window (current-buffer) t)
+             (or (display-images-p)
+                 (and markdown-ts-appear-mathjax-terminal-preview
+                      (markdown-ts-appear-mathjax-kitty--available-p ov)))
              (or (not (markdown-ts-appear-mathjax--editing-p ov)) markdown-ts-appear-mathjax-edit-preview))
     (let ((buffer (current-buffer)) (token (list t))
           (source (overlay-get ov 'markdown-ts-appear-mathjax--source)))
@@ -521,6 +542,8 @@ INLINE applies the dollar-closing whitespace/digit checks. Return its start."
 
 (defun markdown-ts-appear-mathjax--delete (ov)
   "Delete OV and its editing decoration."
+  (when (overlay-get ov 'markdown-ts-appear-mathjax-kitty--view)
+    (markdown-ts-appear-mathjax-kitty--clear ov))
   (markdown-ts-appear-mathjax--clear-panel ov)
   (overlay-put ov 'markdown-ts-appear-mathjax--pending nil)
   (delete-overlay ov))
@@ -780,6 +803,8 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
                      (require 'mathjax nil t) (mathjax-available-p))
           (setq markdown-ts-appear-mathjax-mode nil)
           (user-error "MathJax previews require markdown-ts-mode, the mathjax package and Node.js"))
+        (when markdown-ts-appear-mathjax-terminal-preview
+          (require 'markdown-ts-appear-mathjax-kitty))
         (font-lock-add-keywords nil '((markdown-ts-appear-mathjax--fontify)) t)
         (dolist (property '(invisible display))
           (unless (memq property font-lock-extra-managed-props)
@@ -813,6 +838,7 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
       (setq font-lock-extra-managed-props (delq property font-lock-extra-managed-props)))
     (setq markdown-ts-appear-mathjax--managed nil)
     (remove-hook 'post-command-hook #'markdown-ts-appear-mathjax--post-command t)
+    (remove-hook 'post-command-hook #'markdown-ts-appear-mathjax-kitty--repaint t)
     (remove-hook 'markdown-ts-appear--tracking-change-hook #'markdown-ts-appear-mathjax--post-command t)
     (remove-hook 'after-change-functions #'markdown-ts-appear-mathjax--changed t)
     (when (and (treesit-parser-p treesit-primary-parser)

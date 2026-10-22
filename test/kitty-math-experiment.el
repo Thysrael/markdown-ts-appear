@@ -1,0 +1,205 @@
+;;; kitty-math-experiment.el --- Real Kitty lifecycle check -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Thysrael
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Run in a fresh Kitty Emacs -nw -Q; add kitty-graphics.el with -L.
+;; Set KITTY_MATH_LOG to keep the test log at a chosen path.
+
+(require 'package)
+(package-initialize)
+(setq load-prefer-newer t native-comp-jit-compilation nil)
+(add-to-list 'load-path (expand-file-name ".." (file-name-directory load-file-name)))
+(require 'markdown-ts-appear-mathjax-kitty)
+(defvar kitty-math-test--log
+  (or (getenv "KITTY_MATH_LOG") (make-temp-file "kitty-math-" nil ".log")))
+(defvar kitty-math-test--step 0)
+(defvar kitty-math-test--compiles 0)
+(defvar kitty-math-test--source nil)
+(defvar kitty-math-test--placements (make-hash-table))
+(defvar kitty-math-test--before-redraw nil)
+(defvar kitty-math-test--redraw-compiles nil)
+(defvar kitty-math-test--deadline (+ (float-time) 20))
+(defun kitty-math-test--log (value)
+  "Append VALUE to the test log."
+  (write-region (concat (prin1-to-string value) "\n") nil kitty-math-test--log t 'silent))
+(defun kitty-math-test--check (value label)
+  "Record LABEL, failing when VALUE is nil."
+  (unless value (error "Failed: %s" label))
+  (kitty-math-test--log (list :pass label)))
+(defun kitty-math-test--centered (view placements)
+  "Check VIEW is centered separately in every window in PLACEMENTS."
+  (dolist (placement placements)
+    (let* ((win (car placement))
+           (numbers (kitty-graphics--window-line-number-width win))
+           (expected (+ 1 (car (window-body-edges win)) numbers
+                        (max 0 (/ (- (window-body-width win) numbers
+                                     (overlay-get view 'kitty-graphics-cols)) 2)))))
+      (kitty-math-test--check (= expected (plist-get (cdr placement) :col))
+                              "display centered in its window"))))
+(advice-add 'markdown-ts-appear-mathjax--send :before
+            (lambda (&rest _) (cl-incf kitty-math-test--compiles)))
+(advice-add 'kitty-graphics--place-image :before
+            (lambda (id &rest _)
+              (puthash id (1+ (gethash id kitty-math-test--placements 0)) kitty-math-test--placements)))
+(setq markdown-ts-appear-mathjax-terminal-preview t
+      markdown-ts-appear-mathjax-edit-preview t
+      markdown-ts-appear-mathjax-cache-directory (make-temp-file "kitty-math-cache-" t))
+(kitty-graphics-mode 1)
+(switch-to-buffer (get-buffer-create "*Kitty math experiment*"))
+(insert "# Formula\n\n$$\n\\frac{1}{1+e^{-x}}\n$$\n\n")
+(dotimes (i 100) (insert (format "Scroll line %d\n" i)))
+(setq kitty-math-test--source (buffer-string))
+(markdown-ts-mode)
+(goto-char (point-min))
+(markdown-ts-appear-mathjax-mode 1)
+(defun kitty-math-test--run ()
+  "Check successive redisplay states in an actual terminal command loop."
+  (condition-case err
+      (with-current-buffer "*Kitty math experiment*"
+        (let* ((ov (car markdown-ts-appear-mathjax--objects))
+               (view (and ov (overlay-get ov 'markdown-ts-appear-mathjax-kitty--view)))
+               (placements (and view (overlay-get view 'kitty-graphics-placements))))
+          (if (and (= kitty-math-test--step 0) (not placements)
+                   (< (float-time) kitty-math-test--deadline))
+              (run-at-time 0.1 nil #'kitty-math-test--run)
+            (pcase kitty-math-test--step
+              (0
+               (kitty-math-test--check placements "initial terminal placement")
+               (kitty-math-test--centered view placements)
+               (goto-char (+ (overlay-start ov) 4))
+               (markdown-ts-appear-mathjax--post-command))
+              (1
+               (kitty-math-test--check (> (overlay-start view) (overlay-end ov)) "preview follows source")
+               (kitty-math-test--check (overlay-get ov 'markdown-ts-appear-mathjax--rows) "source frame enabled")
+               (kitty-math-test--centered view placements)
+               (let ((source-row (cdr (posn-col-row (posn-at-point (overlay-end ov)))))
+                     (image-row (plist-get (cdar placements) :row)))
+                 (kitty-math-test--check (> (1- image-row) source-row) "image below delimiter"))
+               (let ((start (float-time)))
+                 (dotimes (i 1000)
+                   (goto-char (+ (overlay-start ov) 4 (% i 2)))
+                   (markdown-ts-appear-mathjax--post-command)
+                   (markdown-ts-appear-mathjax-kitty--repaint))
+                 (kitty-math-test--log (list :motion-ms (* 1000 (- (float-time) start)))))
+               (kitty-math-test--check (eq view (overlay-get ov 'markdown-ts-appear-mathjax-kitty--view))
+                                       "motion retains placement overlay")
+               (let ((win (split-window-right)))
+                 (set-window-buffer win (current-buffer))
+                 (set-window-start win (point-min))))
+              (2
+               (kitty-math-test--check (= (length placements) 2) "two placements")
+               (kitty-math-test--centered view placements)
+               (kitty-math-test--check (/= (plist-get (cdar placements) :col)
+                                            (plist-get (cdr (cadr placements)) :col)) "distinct split columns")
+               (goto-char (point-max))
+               (markdown-ts-appear-mathjax--post-command)
+               (dolist (win (get-buffer-window-list))
+                 (set-window-point win (point-max))
+                 (set-window-start win (save-excursion (forward-line -5) (point)))))
+              (3
+               (kitty-math-test--check (null placements) "offscreen placements removed")
+               (delete-other-windows)
+               (goto-char (point-min))
+               (set-window-start (selected-window) (point-min))
+               (markdown-ts-appear-mathjax--post-command))
+              (4
+               (kitty-math-test--check (= (length placements) 1) "scroll back restores placement")
+               (kitty-math-test--centered view placements)
+               (kitty-math-test--check (not (overlay-get ov 'markdown-ts-appear-mathjax--rows)) "leaving removes source frame")
+               (kitty-math-test--check (= kitty-math-test--compiles 1) "layout does not recompile")
+               (unless (equal kitty-math-test--source (buffer-string))
+                 (kitty-math-test--log (list :changed-text (buffer-string))))
+               (kitty-math-test--check (equal kitty-math-test--source (buffer-string)) "source unchanged")
+               (goto-char (+ (overlay-start ov) 3))
+               (markdown-ts-appear-mathjax--post-command)
+               (insert "2")
+               (kitty-math-test--check (not (overlay-get ov 'markdown-ts-appear-mathjax-kitty--view))
+                                       "edit clears stale preview"))
+              (5
+               (kitty-math-test--check (= kitty-math-test--compiles 2) "idle compiles once")
+               (kitty-math-test--check (and view (> (overlay-start view) (overlay-end ov)) placements)
+                                       "idle restores editing preview")
+               (goto-char (point-min))
+               (insert "Inline $e^{i\\pi}+1=0$ and $a^2+b^2=c^2$ tail.\n\n")
+               (goto-char (point-max))
+               (markdown-ts-appear-mathjax-refresh)
+               (goto-char (point-min))
+               (set-window-start (selected-window) (point-min)))
+              (6
+               (let ((inlines (seq-filter (lambda (o) (eq (overlay-get o 'markdown-ts-appear-mathjax--kind) 'inline))
+                                          markdown-ts-appear-mathjax--objects)))
+                 (kitty-math-test--check (= (length inlines) 2) "two inline formulas detected")
+                 (dolist (inline inlines)
+                   (let* ((image (overlay-get inline 'markdown-ts-appear-mathjax-kitty--view))
+                          (placement (cdar (overlay-get image 'kitty-graphics-placements)))
+                          (position (posn-col-row (posn-at-point (overlay-start inline))))
+                          (edges (window-body-edges)))
+                     (kitty-math-test--check
+                      (and (= (plist-get placement :rows) 1)
+                           (= (plist-get placement :row) (+ 1 (nth 1 edges) (cdr position)))
+                           (= (plist-get placement :col) (+ 1 (car edges) (car position)))
+                           (not (string-match-p "\n" (overlay-get image 'display))))
+                      "inline placement matches text without added newline")
+                     (with-temp-buffer
+                       (let ((status (process-file "magick" nil t nil "identify" "-format" "%[fx:p{0,0}.a]"
+                                                   (overlay-get image 'kitty-graphics-file))))
+                         (kitty-math-test--check (and (zerop status) (equal (buffer-string) "0"))
+                                                 "PNG background is transparent")))
+                     (with-temp-buffer
+                       (process-file "magick" nil t nil "identify" "-format" "%h"
+                                     (overlay-get image 'kitty-graphics-file))
+                       (kitty-math-test--check
+                        (= (string-to-number (buffer-string))
+                           (* 4 (or (terminal-parameter nil 'kitty-graphics-cell-h)
+                                    kitty-graphics--cell-pixel-height 16)))
+                        "inline raster is high resolution while placement stays one row"))))
+                 (goto-char (1+ (overlay-start (car inlines))))
+                 (markdown-ts-appear-mathjax--post-command)))
+              ((or 7 8)
+               (let ((count 0))
+                 (dolist (inline markdown-ts-appear-mathjax--objects)
+                   (when (eq (overlay-get inline 'markdown-ts-appear-mathjax--kind) 'inline)
+                     (when-let* ((image (overlay-get inline 'markdown-ts-appear-mathjax-kitty--view)))
+                       (cl-incf count)
+                       (let ((position (posn-col-row (posn-at-point (overlay-start inline))))
+                             (placement (cdar (overlay-get image 'kitty-graphics-placements)))
+                             (edges (window-body-edges)))
+                         (kitty-math-test--check
+                          (and (= (plist-get placement :row) (+ 1 (nth 1 edges) (cdr position)))
+                               (= (plist-get placement :col) (+ 1 (car edges) (car position))))
+                          "neighbor image follows source reveal/re-hide")))))
+                 (kitty-math-test--check (= count (if (= kitty-math-test--step 7) 1 2))
+                                         "only edited inline formula reveals source"))
+               (when (= kitty-math-test--step 7)
+                 (goto-char (point-min))
+                 (markdown-ts-appear-mathjax--post-command)))
+              (9
+               (setq kitty-math-test--redraw-compiles kitty-math-test--compiles
+                     kitty-math-test--before-redraw nil)
+               (dolist (source markdown-ts-appear-mathjax--objects)
+                 (when-let* ((image (overlay-get source 'markdown-ts-appear-mathjax-kitty--view))
+                             (id (overlay-get image 'kitty-graphics-id)))
+                   (push (list source image id (gethash id kitty-math-test--placements 0))
+                         kitty-math-test--before-redraw)))
+               (redraw-display))
+              (10
+               (dolist (record kitty-math-test--before-redraw)
+                 (kitty-math-test--check
+                  (and (eq (nth 1 record) (overlay-get (car record) 'markdown-ts-appear-mathjax-kitty--view))
+                       (> (gethash (nth 2 record) kitty-math-test--placements 0) (nth 3 record)))
+                  "screen clear re-emits existing image without rebuilding overlay"))
+               (kitty-math-test--check (= kitty-math-test--compiles kitty-math-test--redraw-compiles)
+                                       "screen clear does not recompile math")
+               (markdown-ts-appear-mathjax-mode -1)
+               (kitty-math-test--check (not (seq-some (lambda (o) (overlay-get o 'kitty-graphics))
+                                                    (overlays-in (point-min) (point-max)))) "disable cleans views")
+               (kitty-graphics-mode -1)
+               (kill-emacs 0)))
+            (cl-incf kitty-math-test--step)
+            (run-at-time 0.8 nil #'kitty-math-test--run))))
+    (error
+     (kitty-math-test--log (list :step kitty-math-test--step :error err
+                                :messages (with-current-buffer "*Messages*" (buffer-string))))
+     (kill-emacs 1))))
+(run-at-time 0.1 nil #'kitty-math-test--run)
+(run-at-time 25 nil (lambda () (kitty-math-test--log :timeout) (kill-emacs 2)))

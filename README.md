@@ -64,8 +64,8 @@ Or install the latest Git revision:
 
 ## Optional previews
 
-Math and diagram previews are disabled by default. Both require an Emacs build
-with SVG image support.
+Math and diagram previews are disabled by default. Normal previews require an
+Emacs display with SVG image support; ordinary `emacs -nw` shows math source.
 
 ### Math
 
@@ -82,6 +82,52 @@ both are installed. Their rendering differs slightly.
 
 For a live preview below display-math source, enable
 `markdown-ts-appear-mathjax-edit-preview` with the MathJax backend.
+
+#### Kitty terminal experiment
+
+The `experiment/kitty-math-preview` branch adds an opt-in display adapter using
+[kitty-graphics.el](https://github.com/cashmeredev/kitty-graphics.el), tested at
+revision `13666d4eb2ef4eeed24697c0326368eff3667dce`. It reuses MathJax rendering
+and caching; the adapter rasterizes transparent PNGs asynchronously and
+kitty-graphics handles terminal placement. This terminal adapter supports only
+MathJax, not the latex-to-svg backend.
+It requires Kitty, ImageMagick, the GNU ELPA `mathjax` package, and Node.js.
+Add kitty-graphics.el to `load-path`, then in a fresh terminal session configure
+these options **before enabling** `markdown-ts-appear-mode`:
+
+```emacs-lisp
+(require 'kitty-graphics)
+(kitty-graphics-mode 1)
+(setopt markdown-ts-appear-enable-math-preview t
+        markdown-ts-appear-math-renderer 'mathjax
+        markdown-ts-appear-mathjax-terminal-preview t
+        markdown-ts-appear-mathjax-edit-preview t)
+```
+
+Standalone display and ordinary inline formulas are supported. PNGs have a
+transparent background and are scaled relative to terminal cell height;
+`markdown-ts-appear-mathjax-scale` adjusts their size. Inline formulas fit one
+terminal row with vertical breathing room and reveal source while editing.
+PNGs use 4x raster resolution without enlarging their terminal placement.
+Display previews center independently in each window (controlled by
+`markdown-ts-appear-mathjax-center-display`); editing shows the source frame
+above a centered preview. Editing previews for display formulas currently
+need an empty line after the closing delimiter. Table math, mixed GUI/TTY
+clients, and tmux are not yet validated. This is experimental: a source
+integrity failure during terminal capability probing remains under investigation.
+Placement tests cannot
+establish absence of visual residue or flicker.
+
+Run the isolated terminal check from this checkout inside Kitty:
+
+```sh
+TERM=xterm-256color KITTY_MATH_LOG=/path/to/result.log \
+  emacs -nw -Q -L /path/to/kitty-graphics.el -l test/kitty-math-experiment.el
+```
+
+The check exercises source reveal, below-source idle updates, split windows,
+scrolling, source integrity, cache reuse, and cleanup, then exits.
+For an interactive scratch-buffer demo instead, use `-l test/try-kitty-math.el`.
 
 ### Diagrams
 
