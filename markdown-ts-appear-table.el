@@ -582,9 +582,11 @@ of container indentation unshaded."
                             '(markdown-ts-appear-table default) t display)
     ;; Extend the buffer background, not the source table face, past each row.
     ;; This also applies to newlines in the cursor's before/after strings.
+    ;; Inherit the table face too, so a custom table font also sets the line
+    ;; height; otherwise box-drawing borders disconnect between rows.
     (let ((pos 0))
       (while (setq pos (string-search "\n" display pos))
-        (put-text-property pos (1+ pos) 'face '(:inherit default :extend t) display)
+        (put-text-property pos (1+ pos) 'face '(:inherit (markdown-ts-appear-table default) :extend t) display)
         (setq pos (1+ pos))))
     display))
 
