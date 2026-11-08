@@ -70,6 +70,28 @@
             (overlay-get anchor 'markdown-ts-appear-table--line)
             (overlay-get anchor 'markdown-ts-appear-table--offset)))))
 
+(ert-deftest markdown-ts-appear-navigation-test-explicit-evil-insert ()
+  (let ((markdown-ts-appear-block-reveal 'explicit))
+    (dolist (modal-hooks '(nil t))
+      (markdown-ts-appear-navigation-test--buffer t
+        (when modal-hooks
+          (add-hook 'evil-insert-state-entry-hook #'markdown-ts-appear-start nil t)
+          (add-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop nil t))
+        (markdown-ts-appear-navigation-test--at "`-C`" 2)
+        (unless modal-hooks (markdown-ts-appear-start))
+        (should-not markdown-ts-appear--region)
+        (let ((position (point)))
+          (markdown-ts-appear-navigation-test--key "i")
+          (should markdown-ts-appear--explicit-region)
+          (should-not markdown-ts-appear-table--cursor-overlays)
+          (should (= position (point)))
+          (markdown-ts-appear-navigation-test--key "Q")
+          (should (eq (char-before) ?Q))
+          (markdown-ts-appear-navigation-test--key "<escape>")
+          (when modal-hooks
+            (should-not markdown-ts-appear--explicit-region)
+            (should markdown-ts-appear-table--cursor-overlays)))))))
+
 (ert-deftest markdown-ts-appear-navigation-test-native-hidden-markup ()
   (markdown-ts-appear-navigation-test--buffer nil
     (dolist (key '("C-f" "M-f"))

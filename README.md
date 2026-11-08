@@ -119,6 +119,7 @@ faces.  See `C-h v` and `M-x describe-face` for full documentation.
 
 | Option | Default | Values and effect |
 | --- | --- | --- |
+| `markdown-ts-appear-block-reveal` | `automatic` | `explicit` keeps wrapped tables and diagrams rendered until `RET`, an edit, or Evil insert state opens the whole block. |
 | `markdown-ts-appear-heading-bullets` | `nil` | List of strings or characters, e.g. `'("◉" "○")`, cycled by ATX heading level; `nil` keeps normal rendering. |
 | `markdown-ts-appear-link-icon` | `""` | String before ordinary links; empty disables it. |
 | `markdown-ts-appear-image-icon` | `""` | String before image links; empty disables it. |
@@ -155,6 +156,26 @@ Re-enable `markdown-ts-appear-mode` after changing the math preview-enable optio
 | `markdown-ts-appear-table-zebra` | Alternating data-cell backgrounds in wrapped tables. |
 
 Other colors and fonts follow `markdown-ts-mode` and the current theme.
+
+## Explicit Block Editing
+
+To browse large tables and diagrams without revealing source as point moves:
+
+```elisp
+(setopt markdown-ts-appear-block-reveal 'explicit)
+```
+
+Press `RET` on a rendered wrapped table or diagram to open its whole source
+without inserting text.  Subsequent `RET` presses use the original binding
+(including native table row navigation).  Typing or deleting also opens the
+edited block.  Moving outside the block or stopping source tracking restores
+its rendering.  Bold text, links and other small elements still reveal on motion.
+
+Explicit editing opens the whole table regardless of `markdown-ts-appear-table-reveal`.
+Evil insert state opens the block without an extra `RET`; the modal configuration
+below also restores rendering when returning to normal state.  Source tracking
+must be active for explicit editing.  `M-x markdown-ts-appear-edit-block` is also
+available for custom keybindings.
 
 ## Modal Editing
 

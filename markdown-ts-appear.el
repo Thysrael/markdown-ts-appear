@@ -57,6 +57,17 @@ Set nil before enabling the mode to let modal editing hooks call
 `markdown-ts-appear-start' and `markdown-ts-appear-stop' instead."
   :type 'boolean)
 
+(defcustom markdown-ts-appear-block-reveal 'automatic
+  "How wrapped tables and diagram previews enter source editing.
+With `automatic', source follows point as usual.  With `explicit', keep
+these blocks rendered until RET, an edit, or Evil insert state opens the
+whole block.  Leaving the block or stopping tracking restores rendering.
+Other Markdown elements still follow point."
+  :type '(choice (const :tag "Follow point" automatic)
+                 (const :tag "Explicit block editing" explicit))
+  :initialize #'custom-initialize-default
+  :set #'markdown-ts-appear--set-render-option)
+
 (defcustom markdown-ts-appear-enable-math-preview nil
   "Whether to enable the selected optional math renderer.
 See `markdown-ts-appear-math-renderer'.  An independently enabled math mode
@@ -183,6 +194,9 @@ The `wrapped' style fits cells to the window without changing buffer text."
 
 (defvar-local markdown-ts-appear--region nil
   "Markers delimiting the semantic Markdown source currently visible.")
+
+(defvar-local markdown-ts-appear--explicit-region nil
+  "Markers delimiting a block explicitly opened for source editing.")
 
 (defvar-local markdown-ts-appear--last-point nil
   "Buffer position checked by the most recent reveal update.")
@@ -638,18 +652,114 @@ BLOCK is the Markdown node already found at POS, when available."
                         "image")))
       (cons (treesit-node-start image) (treesit-node-end image)))))
 
+(defun markdown-ts-appear--block-at-point (&optional position node)
+  "Return wrapped-table or diagram bounds at POSITION, defaulting to point.
+NODE is the Markdown node at POSITION, when already available."
+  (let* ((position (or position (point)))
+         (table (and (eq markdown-ts-appear-table-style 'wrapped)
+                     (markdown-ts-appear--node-ancestor
+                      (or node (markdown-ts-appear--markdown-node-at position))
+                      "pipe_table"))))
+    (if table
+        (let ((beg (treesit-node-start table)) (end (treesit-node-end table)))
+          (when (and (<= beg position)
+                     (or (< position end)
+                         (and (= position end (point-max))
+                              (not (eq (char-before end) ?\n)))))
+            (cons beg end)))
+      (when-let* ((markdown-ts-appear-diagram--objects)
+                 (source
+                   (seq-find
+                    (lambda (overlay)
+                      (overlay-get overlay 'markdown-ts-appear-diagram--source))
+                    (append (overlays-at position)
+                            (overlays-at (max (point-min) (1- position)))))))
+        (cons (overlay-start source) (overlay-end source))))))
+
+(defun markdown-ts-appear--explicit-editing-p ()
+  "Return non-nil while point remains in the explicitly opened block."
+  (when-let* ((region markdown-ts-appear--explicit-region))
+    (and (<= (car region) (point) (cdr region))
+         (or (< (point) (cdr region))
+             (not (eq (char-before) ?\n))))))
+
+(defun markdown-ts-appear--set-explicit-region (bounds)
+  "Track block BOUNDS with markers, or clear explicit editing when nil."
+  (when markdown-ts-appear--explicit-region
+    (set-marker (car markdown-ts-appear--explicit-region) nil)
+    (set-marker (cdr markdown-ts-appear--explicit-region) nil))
+  (setq markdown-ts-appear--explicit-region
+        (when bounds (cons (copy-marker (car bounds))
+                           (copy-marker (cdr bounds) t)))))
+
+(defun markdown-ts-appear--block-reveal-p ()
+  "Return non-nil when the current large block may reveal its source."
+  (or (eq markdown-ts-appear-block-reveal 'automatic)
+      (markdown-ts-appear--explicit-editing-p)))
+
+(defun markdown-ts-appear-edit-block ()
+  "Reveal the whole table or diagram at point without changing its text."
+  (interactive)
+  (unless (and (markdown-ts-appear--active-p) (markdown-ts-appear--tracking-p))
+    (user-error "Markdown source tracking is not active"))
+  (let ((bounds (markdown-ts-appear--block-at-point)))
+    (unless bounds (user-error "No wrapped table or diagram at point"))
+    (markdown-ts-appear--set-explicit-region bounds)
+    (setq markdown-ts-appear--last-point nil)
+    (markdown-ts-appear--update)
+    (run-hooks 'markdown-ts-appear--tracking-change-hook)))
+
+(defun markdown-ts-appear--edit-block-binding (command)
+  "Return COMMAND only while an explicit block preview is under point."
+  (when (and (eq markdown-ts-appear-block-reveal 'explicit)
+             (markdown-ts-appear--active-p) (markdown-ts-appear--tracking-p)
+             (not (markdown-ts-appear--explicit-editing-p))
+             (markdown-ts-appear--block-at-point)
+             (get-char-property (min (point) (1- (point-max)))
+                                'display (selected-window)))
+    command))
+
+(defvar markdown-ts-appear-mode-map
+  (let ((map (make-sparse-keymap)))
+    (dolist (key '("RET" "<return>"))
+      (define-key map (kbd key)
+                  '(menu-item "Edit block" markdown-ts-appear-edit-block
+                              :filter markdown-ts-appear--edit-block-binding)))
+    map)
+  "Keymap for `markdown-ts-appear-mode'.")
+
+(defun markdown-ts-appear--before-change (beg _end)
+  "Open a large block before an edit at BEG while tracking is active."
+  (when (and (eq markdown-ts-appear-block-reveal 'explicit)
+             (markdown-ts-appear--tracking-p)
+             (not (markdown-ts-appear--explicit-editing-p)))
+    (when-let* ((bounds (markdown-ts-appear--block-at-point beg)))
+      (markdown-ts-appear--set-explicit-region bounds))))
+
+(defun markdown-ts-appear--evil-insert ()
+  "Open a large block when entering Evil insert state with tracking active."
+  (when (and (eq markdown-ts-appear-block-reveal 'explicit)
+             (markdown-ts-appear--tracking-p)
+             (not (markdown-ts-appear--explicit-editing-p)))
+    (markdown-ts-appear-start)))
+
 (defun markdown-ts-appear--bounds ()
   "Return source bounds for the smallest rendered element at point."
-  (let* ((pos (point))
-         (node (markdown-ts-appear--markdown-node-at pos)))
-    (or (markdown-ts-appear-table--reveal-bounds node)
-        (unless (markdown-ts-appear-math--span-at pos)
-          (or (markdown-ts-appear--fence-bounds-at pos node)
-              (markdown-ts-appear--callout-bounds-at pos node)
-              (markdown-ts-appear--quote-marker-bounds-at pos node)
-              (unless (markdown-ts-appear--literal-block-at pos node)
-                (or (markdown-ts-appear--image-preview-bounds-at pos)
-                    (markdown-ts-appear--bounds-at-point pos node))))))))
+  (if (markdown-ts-appear--explicit-editing-p)
+      (cons (marker-position (car markdown-ts-appear--explicit-region))
+            (marker-position (cdr markdown-ts-appear--explicit-region)))
+    (let* ((pos (point))
+           (node (markdown-ts-appear--markdown-node-at pos)))
+      (unless (and (eq markdown-ts-appear-block-reveal 'explicit)
+                   (markdown-ts-appear--block-at-point pos node))
+        (or (markdown-ts-appear-table--reveal-bounds node)
+            (unless (markdown-ts-appear-math--span-at pos)
+              (or (markdown-ts-appear--fence-bounds-at pos node)
+                  (markdown-ts-appear--callout-bounds-at pos node)
+                  (markdown-ts-appear--quote-marker-bounds-at pos node)
+                  (unless (markdown-ts-appear--literal-block-at pos node)
+                    (or (markdown-ts-appear--image-preview-bounds-at pos)
+                        (markdown-ts-appear--bounds-at-point pos node))))))))))
 
 (defun markdown-ts-appear--update-inline-ranges ()
   "Update inline Tree-sitter ranges around point when needed."
@@ -663,6 +773,9 @@ BLOCK is the Markdown node already found at POS, when available."
 
 (defun markdown-ts-appear--update ()
   "Reveal source for the rendered Markdown element at point."
+  (when (and markdown-ts-appear--explicit-region
+             (not (markdown-ts-appear--explicit-editing-p)))
+    (markdown-ts-appear--set-explicit-region nil))
   (let ((position (point))
         (tick (buffer-chars-modified-tick)))
     (unless (and (equal position markdown-ts-appear--last-point)
@@ -700,6 +813,10 @@ BLOCK is the Markdown node already found at POS, when available."
           markdown-ts-appear--last-tick nil
           markdown-ts-appear--last-range-line nil)
     (add-hook 'post-command-hook #'markdown-ts-appear--update nil t)
+    (when (and (bound-and-true-p evil-local-mode)
+               (eq (bound-and-true-p evil-state) 'insert)
+               (eq markdown-ts-appear-block-reveal 'explicit))
+      (markdown-ts-appear--set-explicit-region (markdown-ts-appear--block-at-point)))
     (markdown-ts-appear--update)
     (run-hooks 'markdown-ts-appear--tracking-change-hook)))
 
@@ -707,6 +824,7 @@ BLOCK is the Markdown node already found at POS, when available."
   "Stop tracking point and restore hidden Markdown markup."
   (interactive)
   (remove-hook 'post-command-hook #'markdown-ts-appear--update t)
+  (markdown-ts-appear--set-explicit-region nil)
   (setq markdown-ts-appear--last-point nil
         markdown-ts-appear--last-tick nil
         markdown-ts-appear--last-range-line nil)
@@ -1292,7 +1410,9 @@ at most one following space or tab and are not clipped to START or LIMIT."
             (markdown-ts-appear-diagram--setup)))
          ((eq option 'markdown-ts-appear-table-zebra-stripe)
           (markdown-ts-appear-table--refresh-stripes))
-         ((eq option 'markdown-ts-appear-table-reveal)
+         ((memq option '(markdown-ts-appear-block-reveal markdown-ts-appear-table-reveal))
+          (when (eq option 'markdown-ts-appear-block-reveal)
+            (markdown-ts-appear--set-explicit-region nil))
           (setq markdown-ts-appear--last-point nil)
           (when (markdown-ts-appear--tracking-p) (markdown-ts-appear--update))
           (markdown-ts-appear-table--post-command))
@@ -1384,6 +1504,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
 
 (defun markdown-ts-appear--install-buffer-hooks ()
   "Install buffer-local lifecycle and change hooks."
+  (add-hook 'before-change-functions #'markdown-ts-appear--before-change nil t)
+  (add-hook 'evil-insert-state-entry-hook #'markdown-ts-appear--evil-insert nil t)
   (add-hook 'after-change-functions #'markdown-ts-appear--after-change t t)
   (treesit-parser-add-notifier
    treesit-primary-parser #'markdown-ts-appear--structure-notifier)
@@ -1396,6 +1518,8 @@ at most one following space or tab and are not clipped to START or LIMIT."
 
 (defun markdown-ts-appear--remove-buffer-hooks ()
   "Remove buffer-local lifecycle and change hooks."
+  (remove-hook 'before-change-functions #'markdown-ts-appear--before-change t)
+  (remove-hook 'evil-insert-state-entry-hook #'markdown-ts-appear--evil-insert t)
   (remove-hook 'after-change-functions #'markdown-ts-appear--after-change t)
   ;; Indirect clones share the base buffer's parser.
   (when (and (treesit-parser-p treesit-primary-parser)
@@ -1427,7 +1551,8 @@ Indirect buffers are otherwise unsupported and are not synchronized."
   (when (buffer-base-buffer)
     ;; Do not run normal teardown: text properties are shared with the base.
     (setq markdown-ts-appear-mode nil
-          markdown-ts-appear--region nil)
+          markdown-ts-appear--region nil
+          markdown-ts-appear--explicit-region nil)
     (markdown-ts-appear-image--detach)
     (markdown-ts-appear-diagram--detach)
     (markdown-ts-appear-table--detach)
@@ -1502,6 +1627,7 @@ Indirect buffers are otherwise unsupported and are not synchronized."
   "Reveal rendered Markdown source at point.
 Disabling the mode resets `markdown-ts-hide-markup' to its current default."
   :lighter nil
+  :keymap markdown-ts-appear-mode-map
   ;; The mode variable is already set, so inspect the installed hook instead.
   (let ((initialized
          (memq #'markdown-ts-appear--after-change after-change-functions)))

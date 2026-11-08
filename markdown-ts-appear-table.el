@@ -43,6 +43,8 @@
 (declare-function image-size "image.c" (spec &optional pixels frame))
 (declare-function markdown-ts-appear--active-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--tracking-p "markdown-ts-appear")
+(declare-function markdown-ts-appear--block-reveal-p "markdown-ts-appear")
+(declare-function markdown-ts-appear--explicit-editing-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--node-ancestor "markdown-ts-appear")
 (declare-function markdown-ts-appear--add-outline-hook "markdown-ts-appear")
 (declare-function markdown-ts-appear--remove-outline-hook "markdown-ts-appear")
@@ -806,9 +808,11 @@ DISPLAY-P non-nil restores their rendered display."
 
 (defun markdown-ts-appear-table--reveal-bounds (&optional node)
   "Return whole-table source bounds at point, using block NODE when supplied."
-  (when-let* (((eq markdown-ts-appear-table-reveal 'table))
+  (when-let* (((or (eq markdown-ts-appear-table-reveal 'table)
+                  (markdown-ts-appear--explicit-editing-p)))
               ((eq markdown-ts-appear-table-style 'wrapped))
               ((markdown-ts-appear--tracking-p))
+              ((markdown-ts-appear--block-reveal-p))
               (table (markdown-ts-appear--node-ancestor
                       (or node (treesit-node-at (point) 'markdown)) "pipe_table"))
               (beg (treesit-node-start table))
@@ -824,7 +828,9 @@ DISPLAY-P non-nil restores their rendered display."
                   (beg (marker-position (car region)))
                   (end (marker-position (cdr region))))
         (cons beg end))
-      (markdown-ts-appear-math--revealed-region)))
+      (when (or (bound-and-true-p isearch-mode)
+                (markdown-ts-appear--block-reveal-p))
+        (markdown-ts-appear-math--revealed-region))))
 
 (defun markdown-ts-appear-table--build-layout (layout beg end)
   "Build LAYOUT's source map and visual lines for BEG..END in one glyph pass.

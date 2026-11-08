@@ -40,6 +40,7 @@
 
 (declare-function markdown-ts-appear--active-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--tracking-p "markdown-ts-appear")
+(declare-function markdown-ts-appear--block-reveal-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--node-ancestor "markdown-ts-appear")
 (declare-function markdown-ts-appear--first-direct-child-of-type "markdown-ts-appear")
 (declare-function markdown-ts-appear--direct-children-of-type "markdown-ts-appear")
@@ -185,6 +186,7 @@ UPDATE is t to recompute all window ends, or a window to update only its end."
 (defun markdown-ts-appear-diagram--editing-p (source)
   "Return non-nil when SOURCE is being edited with source tracking active."
   (and (markdown-ts-appear--tracking-p)
+       (markdown-ts-appear--block-reveal-p)
        (<= (overlay-start source) (point)) (<= (point) (overlay-end source))))
 
 (defun markdown-ts-appear-diagram--editing-source ()

@@ -133,6 +133,53 @@
         (should (equal (buffer-string) markdown-ts-appear-mermaid-test--diagram))
         (should-not (buffer-modified-p))))))
 
+(ert-deftest markdown-ts-appear-mermaid-test-explicit-return-and-leave ()
+  (let ((markdown-ts-appear-block-reveal 'explicit))
+    (markdown-ts-appear-mermaid-test--deferred
+      (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
+        (markdown-ts-appear-mermaid-test--deliver)
+        (goto-char (point-min)) (search-forward "flowchart")
+        (run-hooks 'post-command-hook)
+        (let* ((view (markdown-ts-appear-mermaid-test--view))
+               (image (overlay-get view 'display))
+               (position (point)))
+          (should image)
+          (should-not markdown-ts-appear--region)
+          (when (display-graphic-p)
+            (redisplay t)
+            (let ((xy (posn-x-y (posn-at-point (overlay-start view)))))
+              (should (posn-image (posn-at-x-y (1+ (car xy)) (1+ (cdr xy)))))))
+          (execute-kbd-macro (kbd "RET"))
+          (should (= position (point)))
+          (should (equal (buffer-string) markdown-ts-appear-mermaid-test--diagram))
+          (should-not (overlay-get view 'display))
+          (should markdown-ts-appear--explicit-region)
+          (when (display-graphic-p)
+            (redisplay t)
+            (let ((xy (posn-x-y (posn-at-point))))
+              (should-not (posn-image (posn-at-x-y (1+ (car xy)) (1+ (cdr xy)))))))
+          (goto-char (point-max)) (run-hooks 'post-command-hook)
+          (should-not markdown-ts-appear--explicit-region)
+          (should (eq image (overlay-get view 'display)))
+          (when (display-graphic-p)
+            (redisplay t)
+            (let ((xy (posn-x-y (posn-at-point (overlay-start view)))))
+              (should (posn-image (posn-at-x-y (1+ (car xy)) (1+ (cdr xy)))))))
+          (should (= 1 (length markdown-ts-appear-mermaid-test--jobs))))))))
+
+(ert-deftest markdown-ts-appear-mermaid-test-explicit-edit-pending-preview ()
+  (let ((markdown-ts-appear-block-reveal 'explicit))
+    (markdown-ts-appear-mermaid-test--deferred
+      (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
+        (goto-char (point-min)) (search-forward "A --> B")
+        (run-hooks 'post-command-hook)
+        ;; Without an image, RET retains the major mode's editing command.
+        (should-not (eq (key-binding (kbd "RET")) #'markdown-ts-appear-edit-block))
+        (insert "B") (run-hooks 'post-command-hook)
+        (should markdown-ts-appear--explicit-region)
+        (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'display))
+        (should-not markdown-ts-appear-diagram--job)))))
+
 (ert-deftest markdown-ts-appear-mermaid-test-coalesces-identical-diagrams ()
   (markdown-ts-appear-mermaid-test--deferred
     (markdown-ts-appear-mermaid-test--buffer
