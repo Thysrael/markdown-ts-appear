@@ -995,8 +995,7 @@
 
 (ert-deftest markdown-ts-appear-table-test-whole-table-defers-edit-layout ()
   (dolist (markdown-ts-appear-block-reveal '(automatic explicit))
-    (let ((markdown-ts-appear-table-reveal
-           (if (eq markdown-ts-appear-block-reveal 'automatic) 'table 'row)))
+    (let ((markdown-ts-appear-table-reveal 'table))
       (markdown-ts-appear-table-test--with-buffer
           "| A | B |\n|---|---|\n| value | x |\n\nAfter\n" 30
         (goto-char (point-min)) (search-forward "value") (run-hooks 'post-command-hook)
@@ -1048,7 +1047,8 @@
           (should (= 3 (length (seq-filter (lambda (ov) (overlay-get ov 'display)) rows)))))))))
 
 (ert-deftest markdown-ts-appear-table-test-explicit-return-and-native-binding ()
-  (let ((markdown-ts-appear-block-reveal 'explicit))
+  (let ((markdown-ts-appear-block-reveal 'explicit)
+        (markdown-ts-appear-table-reveal 'table))
     (markdown-ts-appear-table-test--with-buffer
         "| A | B |\n|---|---|\n| **first** | x |\n| last | y |\n\nAfter *text*\n" 30
       (save-window-excursion
@@ -1090,8 +1090,89 @@
           (should markdown-ts-appear--region)
           (should-not (get-text-property (1- (point)) 'invisible)))))))
 
+(ert-deftest markdown-ts-appear-table-test-explicit-row-edit-and-leave ()
+  (let ((markdown-ts-appear-block-reveal 'explicit)
+        (markdown-ts-appear-table-reveal 'row))
+    (markdown-ts-appear-table-test--with-buffer
+        "| A | B |\n|---|---|\n| **first** | x |\n| last | y |\n\nAfter\n" 30
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        ;; Headers, delimiters, and data rows all use the same boundary.
+        (dotimes (line 4)
+          (goto-char (point-min)) (forward-line line)
+          (end-of-line) (run-hooks 'post-command-hook)
+          (should-not markdown-ts-appear--region)
+          (let ((text (buffer-string)) (position (point)))
+            (execute-kbd-macro (kbd "RET"))
+            (should (= position (point)))
+            (should (equal text (buffer-string))))
+          (should (= (line-beginning-position) (car markdown-ts-appear--region)))
+          (should (= (line-end-position) (cdr markdown-ts-appear--region)))
+          (should (= 3 (length (seq-filter (lambda (ov) (overlay-get ov 'display))
+                                           (markdown-ts-appear-table-test--overlays)))))
+          (forward-line) (run-hooks 'post-command-hook)
+          (should-not markdown-ts-appear--explicit-region)
+          (should-not markdown-ts-appear--region)
+          (should (cl-every (lambda (ov) (overlay-get ov 'display))
+                            (markdown-ts-appear-table-test--overlays))))
+        ;; An edit opens only its row and survives the layout rebuild.
+        (goto-char (point-min)) (search-forward "first")
+        (run-hooks 'post-command-hook)
+        (insert "!") (run-hooks 'post-command-hook)
+        (should markdown-ts-appear--explicit-region)
+        (should (= 3 (length (seq-filter (lambda (ov) (overlay-get ov 'display))
+                                         (markdown-ts-appear-table-test--overlays)))))
+        (delete-char -1) (run-hooks 'post-command-hook)
+        (should markdown-ts-appear--explicit-region)
+        ;; Native RET moves to the next existing row, which stays rendered.
+        (beginning-of-line) (run-hooks 'post-command-hook)
+        (execute-kbd-macro (kbd "RET"))
+        (should (string-match-p "last" (buffer-substring-no-properties
+                                        (line-beginning-position) (line-end-position))))
+        (should-not markdown-ts-appear--explicit-region)
+        (should (eq (key-binding (kbd "RET")) #'markdown-ts-appear-edit-block))
+        (should (cl-every (lambda (ov) (overlay-get ov 'display))
+                          (markdown-ts-appear-table-test--overlays)))))))
+
+(ert-deftest markdown-ts-appear-table-test-explicit-row-native-insertion ()
+  (let ((markdown-ts-appear-block-reveal 'explicit)
+        (markdown-ts-appear-table-reveal 'row))
+    (markdown-ts-appear-table-test--with-buffer
+        "| A | B |\n|---|---|\n| value | x |\n\nAfter\n" 30
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (goto-char (point-min)) (forward-line 2)
+        (run-hooks 'post-command-hook)
+        (execute-kbd-macro (kbd "RET RET"))
+        (should (= 4 (line-number-at-pos)))
+        (should-not markdown-ts-appear--explicit-region)
+        (should-not markdown-ts-appear--region)
+        (should (cl-every (lambda (ov) (overlay-get ov 'display))
+                          (markdown-ts-appear-table-test--overlays)))
+        (should (eq (key-binding (kbd "RET")) #'markdown-ts-appear-edit-block))))))
+
+(ert-deftest markdown-ts-appear-table-test-explicit-reveal-option-updates-live ()
+  (let ((markdown-ts-appear-block-reveal 'explicit)
+        (markdown-ts-appear-table-reveal 'row))
+    (markdown-ts-appear-table-test--with-buffer
+        "| A | B |\n|---|---|\n| first | x |\n| last | y |\n\nAfter\n" 30
+      (goto-char (point-min)) (search-forward "first") (run-hooks 'post-command-hook)
+      (markdown-ts-appear-edit-block)
+      (let ((rows (markdown-ts-appear-table-test--overlays)))
+        (cl-letf (((symbol-function 'markdown-ts-appear-table--render-table)
+                   (lambda (&rest _) (ert-fail "Reveal option rebuilt table layout"))))
+          (setopt markdown-ts-appear-table-reveal 'table)
+          (should-not (seq-some (lambda (ov) (overlay-get ov 'display)) rows))
+          (setopt markdown-ts-appear-table-reveal 'row)
+          (should (= 3 (length (seq-filter (lambda (ov) (overlay-get ov 'display)) rows))))
+          (forward-line) (run-hooks 'post-command-hook)
+          (should-not markdown-ts-appear--explicit-region)
+          (setopt markdown-ts-appear-table-reveal 'table)
+          (should (cl-every (lambda (ov) (overlay-get ov 'display)) rows)))))))
+
 (ert-deftest markdown-ts-appear-table-test-explicit-edit-and-leave ()
-  (let ((markdown-ts-appear-block-reveal 'explicit))
+  (let ((markdown-ts-appear-block-reveal 'explicit)
+        (markdown-ts-appear-table-reveal 'table))
     (markdown-ts-appear-table-test--with-buffer
         "| A | B |\n|---|---|\n| first | x |\n\nBetween\n\n| C | D |\n|---|---|\n| second | y |\n\nAfter\n" 30
       (goto-char (point-min)) (search-forward "first") (run-hooks 'post-command-hook)

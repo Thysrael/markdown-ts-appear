@@ -61,7 +61,9 @@ Set nil before enabling the mode to let modal editing hooks call
   "How wrapped tables and diagram previews enter source editing.
 With `automatic', source follows point as usual.  With `explicit', keep
 these blocks rendered until RET, an edit, or Evil insert state opens the
-whole block.  Leaving the block or stopping tracking restores rendering.
+source.  Tables use `markdown-ts-appear-table-reveal' to choose a row or
+the whole table; diagrams open in full.  Leaving the revealed region or
+stopping tracking restores rendering.
 Other Markdown elements still follow point."
   :type '(choice (const :tag "Follow point" automatic)
                  (const :tag "Explicit block editing" explicit))
@@ -653,18 +655,25 @@ BLOCK is the Markdown node already found at POS, when available."
       (cons (treesit-node-start image) (treesit-node-end image)))))
 
 (defun markdown-ts-appear--block-at-point (&optional position node)
-  "Return wrapped-table or diagram bounds at POSITION, defaulting to point.
+  "Return source bounds to open at POSITION, defaulting to point.
+Tables follow `markdown-ts-appear-table-reveal'; diagrams open in full.
 NODE is the Markdown node at POSITION, when already available."
   (let* ((position (or position (point)))
-         (table (and (eq markdown-ts-appear-table-style 'wrapped)
-                     (markdown-ts-appear--node-ancestor
-                      (or node (markdown-ts-appear--markdown-node-at position))
-                      "pipe_table"))))
+         (node (and (eq markdown-ts-appear-table-style 'wrapped)
+                    (or node (markdown-ts-appear--markdown-node-at position))))
+         (table (markdown-ts-appear--node-ancestor node "pipe_table")))
     (if table
-        (let ((beg (treesit-node-start table)) (end (treesit-node-end table)))
+        (when-let* ((block (if (eq markdown-ts-appear-table-reveal 'table)
+                              table
+                            ;; Row nodes end before the newline.  At the last
+                            ;; row's EOL, NODE can be the table itself.
+                            (treesit-node-first-child-for-pos
+                             table (max (treesit-node-start table) (1- position)))))
+                    (beg (treesit-node-start block))
+                    (end (treesit-node-end block)))
           (when (and (<= beg position)
                      (or (< position end)
-                         (and (= position end (point-max))
+                         (and (= position end)
                               (not (eq (char-before end) ?\n)))))
             (cons beg end)))
       (when-let* ((markdown-ts-appear-diagram--objects)
@@ -698,7 +707,8 @@ NODE is the Markdown node at POSITION, when already available."
       (markdown-ts-appear--explicit-editing-p)))
 
 (defun markdown-ts-appear-edit-block ()
-  "Reveal the whole table or diagram at point without changing its text."
+  "Reveal source at point without changing its text.
+Tables follow `markdown-ts-appear-table-reveal'; diagrams open in full."
   (interactive)
   (unless (and (markdown-ts-appear--active-p) (markdown-ts-appear--tracking-p))
     (user-error "Markdown source tracking is not active"))
@@ -773,9 +783,6 @@ NODE is the Markdown node at POSITION, when already available."
 
 (defun markdown-ts-appear--update ()
   "Reveal source for the rendered Markdown element at point."
-  (when (and markdown-ts-appear--explicit-region
-             (not (markdown-ts-appear--explicit-editing-p)))
-    (markdown-ts-appear--set-explicit-region nil))
   (let ((position (point))
         (tick (buffer-chars-modified-tick)))
     (unless (and (equal position markdown-ts-appear--last-point)
@@ -785,6 +792,17 @@ NODE is the Markdown node at POSITION, when already available."
              (region markdown-ts-appear--region)
              (old-beg (and region (marker-position (car region))))
              (old-end (and region (marker-position (cdr region)))))
+        ;; Inserting a row can extend the markers past the row we opened.
+        ;; Resolve from its original start, rather than following point.
+        (when-let* ((edited)
+                    ((eq markdown-ts-appear-table-reveal 'row))
+                    (explicit markdown-ts-appear--explicit-region)
+                    (bounds (markdown-ts-appear--block-at-point
+                             (marker-position (car explicit)))))
+          (set-marker (cdr explicit) (cdr bounds)))
+        (when (and markdown-ts-appear--explicit-region
+                   (not (markdown-ts-appear--explicit-editing-p)))
+          (markdown-ts-appear--set-explicit-region nil))
         (without-restriction
           (markdown-ts-appear--update-inline-ranges)
           (let* ((bounds (markdown-ts-appear--bounds))
@@ -1411,8 +1429,11 @@ at most one following space or tab and are not clipped to START or LIMIT."
          ((eq option 'markdown-ts-appear-table-zebra-stripe)
           (markdown-ts-appear-table--refresh-stripes))
          ((memq option '(markdown-ts-appear-block-reveal markdown-ts-appear-table-reveal))
-          (when (eq option 'markdown-ts-appear-block-reveal)
+          (cond
+           ((eq option 'markdown-ts-appear-block-reveal)
             (markdown-ts-appear--set-explicit-region nil))
+           ((markdown-ts-appear--explicit-editing-p)
+            (markdown-ts-appear--set-explicit-region (markdown-ts-appear--block-at-point))))
           (setq markdown-ts-appear--last-point nil)
           (when (markdown-ts-appear--tracking-p) (markdown-ts-appear--update))
           (markdown-ts-appear-table--post-command))

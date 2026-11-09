@@ -44,7 +44,6 @@
 (declare-function markdown-ts-appear--active-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--tracking-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--block-reveal-p "markdown-ts-appear")
-(declare-function markdown-ts-appear--explicit-editing-p "markdown-ts-appear")
 (declare-function markdown-ts-appear--node-ancestor "markdown-ts-appear")
 (declare-function markdown-ts-appear--add-outline-hook "markdown-ts-appear")
 (declare-function markdown-ts-appear--remove-outline-hook "markdown-ts-appear")
@@ -67,7 +66,9 @@
   "Source revealed while editing a wrapped table.
 The default `row' reveals the current row.  With `table', reveal the
 whole table and defer its layout until point leaves or source tracking
-stops.  Reading with source tracking paused keeps tables rendered."
+stops.  With explicit block reveal, leaving the selected row or table
+restores rendering; another region requires a new explicit edit.
+Reading with source tracking paused keeps tables rendered."
   :type '(choice (const :tag "Current row" row)
                  (const :tag "Whole table" table))
   :group 'markdown-ts-appear
@@ -808,8 +809,7 @@ DISPLAY-P non-nil restores their rendered display."
 
 (defun markdown-ts-appear-table--reveal-bounds (&optional node)
   "Return whole-table source bounds at point, using block NODE when supplied."
-  (when-let* (((or (eq markdown-ts-appear-table-reveal 'table)
-                  (markdown-ts-appear--explicit-editing-p)))
+  (when-let* (((eq markdown-ts-appear-table-reveal 'table))
               ((eq markdown-ts-appear-table-style 'wrapped))
               ((markdown-ts-appear--tracking-p))
               ((markdown-ts-appear--block-reveal-p))

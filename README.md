@@ -119,7 +119,7 @@ faces.  See `C-h v` and `M-x describe-face` for full documentation.
 
 | Option | Default | Values and effect |
 | --- | --- | --- |
-| `markdown-ts-appear-block-reveal` | `automatic` | `explicit` keeps wrapped tables and diagrams rendered until `RET`, an edit, or Evil insert state opens the whole block. |
+| `markdown-ts-appear-block-reveal` | `automatic` | `explicit` keeps wrapped tables and diagrams rendered until `RET`, an edit, or Evil insert state opens source. Tables follow `markdown-ts-appear-table-reveal`. |
 | `markdown-ts-appear-heading-bullets` | `nil` | List of strings or characters, e.g. `'("◉" "○")`, cycled by ATX heading level; `nil` keeps normal rendering. |
 | `markdown-ts-appear-link-icon` | `""` | String before ordinary links; empty disables it. |
 | `markdown-ts-appear-image-icon` | `""` | String before image links; empty disables it. |
@@ -165,14 +165,23 @@ To browse large tables and diagrams without revealing source as point moves:
 (setopt markdown-ts-appear-block-reveal 'explicit)
 ```
 
-Press `RET` on a rendered wrapped table or diagram to open its whole source
-without inserting text.  Subsequent `RET` presses use the original binding
+Press `RET` on a rendered wrapped table or diagram to open its source
+without inserting text.  While source is open, `RET` uses the original binding
 (including native table row navigation).  Typing or deleting also opens the
-edited block.  Moving outside the block or stopping source tracking restores
+edited region.  Moving outside that region or stopping source tracking restores
 its rendering.  Bold text, links and other small elements still reveal on motion.
 
-Explicit editing opens the whole table regardless of `markdown-ts-appear-table-reveal`.
-Evil insert state opens the block without an extra `RET`; the modal configuration
+`markdown-ts-appear-table-reveal` controls the table's editing scope:
+
+- `row` (default): open only the current row.  Leaving it restores rendering;
+  other rows stay rendered until explicitly opened.
+- `table`: open the whole table and keep it open until point leaves the table.
+
+For large tables or sustained editing, `table` defers layout until editing ends.
+With `row`, each edit recomputes the table layout to keep the other rows rendered.
+
+Diagram previews always open in full.
+Evil insert state opens source without an extra `RET`; the modal configuration
 below also restores rendering when returning to normal state.  Source tracking
 must be active for explicit editing.  `M-x markdown-ts-appear-edit-block` is also
 available for custom keybindings.
