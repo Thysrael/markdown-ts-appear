@@ -1039,6 +1039,67 @@
     (markdown-ts-appear--update)
     (should (equal (get-text-property 1 'display) "▎"))))
 
+(ert-deftest markdown-ts-appear-test-quote-wrap-prefix-and-reveal ()
+  (markdown-ts-appear-test--with-buffer "> outer\n> > nested > literal\n> outer again\n\nAfter\n"
+    (let ((source (buffer-substring-no-properties (point-min) (point-max))))
+      (dolist (case '(("outer" . "▎ ") ("nested" . "▎ ▎ ") ("again" . "▎ ")))
+        (goto-char (point-min)) (search-forward (car case))
+        (should (equal (get-text-property (point) 'wrap-prefix) (cdr case))))
+      (goto-char (point-min)) (search-forward "nested")
+      (let* ((body (point))
+             (prefix (get-text-property body 'wrap-prefix)))
+        (should (memq 'markdown-ts-appear-block-quote-marker
+                      (get-text-property 0 'face prefix)))
+        (should (memq 'markdown-ts-block-quote (get-text-property 0 'face prefix)))
+        (beginning-of-line) (forward-char 2)
+        (markdown-ts-appear--update)
+        (should (equal (get-text-property body 'wrap-prefix) "▎ > "))
+        (goto-char (point-max)) (markdown-ts-appear--update)
+        (should (equal (get-text-property body 'wrap-prefix) "▎ ▎ "))
+        (let ((markdown-ts-appear-block-quote-marker "||"))
+          (font-lock-flush) (font-lock-ensure)
+          (should (equal (get-text-property body 'wrap-prefix) "|| || "))))
+      (should (equal source (buffer-substring-no-properties (point-min) (point-max))))
+      (markdown-ts-appear-mode -1)
+      (should-not (text-property-not-all (point-min) (point-max) 'wrap-prefix nil)))))
+
+(ert-deftest markdown-ts-appear-test-quote-wrap-external-prefix-and-region ()
+  (markdown-ts-appear-test--with-buffer "> quote text\n\nAfter\n"
+    (markdown-ts-appear--clear-prefixes (point-min) (point-max))
+    (put-text-property (point-min) (point-max) 'wrap-prefix "    ")
+    (let ((node (treesit-node-at (point-min) 'markdown)))
+      ;; Partial fontification must find the prefix before START without
+      ;; touching properties outside the requested range.
+      (dotimes (_ 2)
+        (markdown-ts-appear--fontify-quote-wrap node 'append 5 10)
+        (should (equal (get-text-property 4 'wrap-prefix) "    "))
+        (should (equal (get-text-property 5 'wrap-prefix) "    ▎ "))
+        (should (equal (get-text-property 10 'wrap-prefix) "    ")))
+      (markdown-ts-appear-mode -1)
+      (dotimes (offset (buffer-size))
+        (should (equal (get-text-property (1+ offset) 'wrap-prefix) "    "))))))
+
+(ert-deftest markdown-ts-appear-test-quote-wrap-removed-after-edit ()
+  (dolist (style '(raw connected))
+    (markdown-ts-appear-test--with-buffer "> quote text\n\nAfter\n"
+      (markdown-ts-appear-mode -1)
+      (setq-local markdown-ts-appear-code-fence-style style)
+      (markdown-ts-appear-mode 1)
+      (font-lock-ensure)
+      (should (get-text-property 5 'wrap-prefix))
+      (goto-char (point-min))
+      (delete-char 2)
+      (font-lock-ensure)
+      (should-not (text-property-not-all (point-min) (point-max) 'wrap-prefix nil)))))
+
+(ert-deftest markdown-ts-appear-test-quote-wrap-fast-fontification ()
+  (markdown-ts-appear-test--with-buffer "> > first\n> > second\n\nAfter\n"
+    (let ((treesit--font-lock-fast-mode t)
+          (jit-lock-chunk-size 1))
+      (font-lock-flush) (font-lock-ensure)
+      (goto-char (point-min)) (search-forward "second")
+      (should (equal (get-text-property (point) 'wrap-prefix) "▎ ▎ ")))))
+
 (ert-deftest markdown-ts-appear-test-reuses-native-faces ()
   (markdown-ts-appear-test--with-buffer "> quote\n\n| A | B |\n|---|---|\n"
     (goto-char (point-min))

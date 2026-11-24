@@ -125,7 +125,7 @@ faces.  See `C-h v` and `M-x describe-face` for full documentation.
 | `markdown-ts-appear-image-icon` | `""` | String before image links; empty disables it. |
 | `markdown-ts-appear-wikilink-icon` | `"◆"` | String before Wiki links; empty disables it. |
 | `markdown-ts-appear-code-fence-style` | `connected` | `raw` or `connected` fences with a language label. |
-| `markdown-ts-appear-block-quote-marker` | `"▎"` | Replacement string; `nil` keeps the original marker. |
+| `markdown-ts-appear-block-quote-marker` | `"▎"` | Replacement string, repeated with indentation on soft-wrapped lines; `nil` keeps the original marker. |
 | `markdown-ts-appear-render-callouts` | `t` | Show callout labels and faint backgrounds on the header line only. |
 | `markdown-ts-appear-table-style` | `wrapped` | `raw`, `unicode`, or width-aware `wrapped` tables. |
 | `markdown-ts-appear-table-reveal` | `row` | `row` reveals the current wrapped-table row; `table` reveals the whole table while editing. |

@@ -886,7 +886,8 @@ Tables follow `markdown-ts-appear-table-reveal'; diagrams open in full."
                treesit-font-lock-settings)))))
   (add-to-list 'font-lock-extra-managed-props
                'markdown-ts-appear--decoration)
-  (when (eq markdown-ts-appear-code-fence-style 'connected)
+  (when (or markdown-ts-appear-block-quote-marker
+            (eq markdown-ts-appear-code-fence-style 'connected))
     (add-function :before (local 'font-lock-unfontify-region-function)
                   #'markdown-ts-appear--clear-prefixes))
   (unless (memq 'line-height font-lock-extra-managed-props)
@@ -1177,6 +1178,43 @@ at most one following space or tab and are not clipped to START or LIMIT."
         (markdown-ts-appear--decorate
          beg label-end (markdown-ts-appear--label (nth 2 data) accent) nil)))))
 
+(defun markdown-ts-appear--fontify-quote-wrap (node _override start limit &rest _)
+  "Repeat quote prefix NODE on wrapped screen lines between START and LIMIT.
+Fenced code owns its continuation-prefix rendering."
+  (save-excursion
+    (goto-char (treesit-node-end node))
+    (when (and (markdown-ts-appear--active-p) markdown-ts-appear-block-quote-marker
+               (search-backward ">" (treesit-node-start node) t)
+               (not (markdown-ts-appear--node-ancestor node "fenced_code_block")))
+      (forward-char)
+      (when (and (< (point) (treesit-node-end node))
+                 (memq (char-after) '(?\s ?\t)))
+        (forward-char))
+      (let ((prefix-end (point))
+            (beg (max start (line-beginning-position)))
+            (end (min limit (line-beginning-position 2)))
+            parts)
+        (goto-char (line-beginning-position))
+        (while (< (point) prefix-end)
+          (push (if (eq (char-after) ?>)
+                    (propertize
+                     (if (markdown-ts-appear--region-visible-p (point) (1+ (point)))
+                         ">"
+                       markdown-ts-appear-block-quote-marker)
+                     'face 'markdown-ts-appear-block-quote-marker)
+                  ;; Indent list markers rather than repeating their text.
+                  (string (if (eq (char-after) ?\t) ?\t ?\s)))
+                parts)
+          (forward-char))
+        (when (< beg end)
+          (let ((display (apply #'concat (nreverse parts))))
+            (add-face-text-property
+             0 (length display) 'markdown-ts-block-quote t display)
+            (markdown-ts-appear--decorate-prefix
+             beg end 'wrap-prefix display
+             ;; Visual Wrap already includes the source indentation.
+             (when (bound-and-true-p visual-wrap-prefix-mode) 'line-prefix))))))))
+
 (defun markdown-ts-appear--fontify-quote-marker (node visible-p start limit)
   "Render NODE's quote markers between START and LIMIT unless VISIBLE-P."
   (when (and (not visible-p) markdown-ts-appear-block-quote-marker
@@ -1238,7 +1276,9 @@ at most one following space or tab and are not clipped to START or LIMIT."
    :language 'markdown
    :feature 'paragraph
    :override 'append
-   '(((block_quote) @markdown-ts-appear--fontify-block-quote)))
+   '(((block_quote) @markdown-ts-appear--fontify-block-quote)
+     ([(block_quote_marker) (block_continuation)]
+      @markdown-ts-appear--fontify-quote-wrap)))
   "Additional Tree-sitter font-lock settings for rendered block quotes.")
 
 (defconst markdown-ts-appear--code-font-lock-settings

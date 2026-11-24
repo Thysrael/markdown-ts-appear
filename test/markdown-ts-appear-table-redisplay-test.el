@@ -103,6 +103,38 @@ Have the PTY driver capture the actual native-text cursor instead."
                     (markdown-ts-appear-table-redisplay--cursor expected))))))
         (markdown-ts-appear-mode -1)))))
 
+(ert-deftest markdown-ts-appear-table-redisplay-quote-wrap ()
+  (skip-unless (not noninteractive))
+  (dolist (case '(("> " 2) ("> > " 4) (">>" 2)
+                  ("  > " 4) ("- > " 4) ("> - > " 6)
+                  ("> " 3 "||") ("> > " 6 "||")))
+    (save-window-excursion
+      (with-temp-buffer
+        (switch-to-buffer (current-buffer))
+        (insert (car case) (apply #'concat (make-list 60 "quoted text ")) "\n\nAfter\n")
+        (markdown-ts-mode)
+        (setq-local markdown-ts-appear-block-quote-marker (or (nth 2 case) "▎"))
+        (visual-line-mode 1)
+        (markdown-ts-appear-mode 1)
+        (markdown-ts-appear-stop)
+        (unwind-protect
+            ;; Narrow margins exercise the same display path as writing modes.
+            (dolist (extra-prefix '(nil t))
+              (visual-wrap-prefix-mode (if extra-prefix 1 -1))
+              (font-lock-flush)
+              (dolist (margin '(0 35))
+                (set-window-margins nil margin margin)
+                (font-lock-ensure)
+                (goto-char (point-min))
+                (set-window-start nil (point-min))
+                (redisplay t)
+                (dotimes (line 3)
+                  (vertical-motion 1)
+                  (redisplay t)
+                  (markdown-ts-appear-table-redisplay--cursor
+                   (cons (cadr case) (1+ line))))))
+          (markdown-ts-appear-mode -1))))))
+
 (ert-deftest markdown-ts-appear-table-redisplay-explicit-editing ()
   (skip-unless (not noninteractive))
   (dolist (markdown-ts-appear-table-reveal '(row table))
