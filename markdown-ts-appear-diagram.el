@@ -246,7 +246,6 @@ UPDATE is t to recompute all window ends, or a window to update only its end."
         (unless (equal state previous)
           (overlay-put view 'markdown-ts-appear-diagram--state state)
           (overlay-put view 'display nil)
-          (overlay-put view 'after-string nil)
           (overlay-put view 'help-echo error)
           (when (and image (not editing) (not hidden) (display-images-p (window-frame window)))
             (when layout

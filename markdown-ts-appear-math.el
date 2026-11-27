@@ -170,6 +170,12 @@ Use existing preview overlays; this never requests or compiles an image."
       (advice-add 'latex-to-svg-frontend--show-image :after #'markdown-ts-appear-math--image-shown)
     (advice-remove 'latex-to-svg-frontend--show-image #'markdown-ts-appear-math--image-shown)))
 
+(defun markdown-ts-appear-math--invalidate-tables ()
+  "Rebuild wrapped tables after a math provider starts or stops."
+  (when (and (markdown-ts-appear--active-p) markdown-ts-appear-table--overlays)
+    (markdown-ts-appear-table--invalidate (point-min) (point-max))
+    (markdown-ts-appear-table--schedule-render)))
+
 (defun markdown-ts-appear-math--restore-reveal ()
   "Restore the previous reveal option if it is still owned by appear."
   (when markdown-ts-appear-math--saved-reveal
@@ -193,9 +199,7 @@ Use existing preview overlays; this never requests or compiles an image."
     (markdown-ts-appear-math--restore-reveal)
     (setq markdown-ts-appear-math--owned nil))
   (markdown-ts-appear-math--watch-images)
-  (when (and (markdown-ts-appear--active-p) markdown-ts-appear-table--overlays)
-    (markdown-ts-appear-table--invalidate (point-min) (point-max))
-    (markdown-ts-appear-table--schedule-render))
+  (markdown-ts-appear-math--invalidate-tables)
   (setq markdown-ts-appear--last-point nil)
   (when (markdown-ts-appear--tracking-p)
     (markdown-ts-appear--update)))
@@ -221,9 +225,7 @@ Use existing preview overlays; this never requests or compiles an image."
     (remove-hook 'markdown-ts-appear-mathjax-preview-functions
                  #'markdown-ts-appear-math--image-shown t)
     (setq markdown-ts-appear-math--mathjax-owned nil))
-  (when (and (markdown-ts-appear--active-p) markdown-ts-appear-table--overlays)
-    (markdown-ts-appear-table--invalidate (point-min) (point-max))
-    (markdown-ts-appear-table--schedule-render)))
+  (markdown-ts-appear-math--invalidate-tables))
 
 (defun markdown-ts-appear-math--renderer ()
   "Return the selected renderer, resolving automatic availability checks."

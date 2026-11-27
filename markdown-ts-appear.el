@@ -226,7 +226,6 @@ The `wrapped' style fits cells to the window without changing buffer text."
 
 (defvar markdown-ts-appear--quote-font-lock-settings)
 (defvar markdown-ts-appear--code-font-lock-settings)
-(defvar markdown-ts-appear--table-font-lock-settings)
 
 (defvar markdown-ts-appear--callout-backgrounds nil
   "Cached callout backgrounds, keyed by accent face and its current colors.")
@@ -1255,10 +1254,7 @@ Fenced code owns its continuation-prefix rendering."
                   (end (min limit (point-max) (1+ (line-end-position)))))
               (when (< beg end)
                 (add-face-text-property beg end face t)))))
-        (markdown-ts-appear--fontify-fence node visible-p start limit))
-      (when quote-marker-p
-        (markdown-ts-appear--fontify-quote-marker
-         node visible-p start limit)))))
+        (markdown-ts-appear--fontify-fence node visible-p start limit)))))
 
 (defun markdown-ts-appear--fontify-block-quote
     (node _override start limit &rest _)
@@ -1267,7 +1263,6 @@ Fenced code owns its continuation-prefix rendering."
     (let ((beg (max start (treesit-node-start node)))
           (end (min limit (treesit-node-end node))))
       (when (< beg end)
-        (add-face-text-property beg end 'markdown-ts-block-quote t)
         (markdown-ts-appear--fontify-callout node beg end)
         (markdown-ts-appear--fontify-quote-marker node nil beg end)))))
 
@@ -1372,81 +1367,80 @@ Fenced code owns its continuation-prefix rendering."
 (defun markdown-ts-appear--fontify-link
     (function node override start limit &rest rest)
   "Call FUNCTION for NODE, prefixing links with an icon."
-  (if (not (markdown-ts-appear--active-p))
-      (apply function node override start limit rest)
-    (apply function node override start limit rest)
-    (let* ((parent (treesit-node-parent node))
-           (parent-beg (treesit-node-start parent))
-           (parent-end (treesit-node-end parent))
-           (beg (treesit-node-start node))
-           (end (treesit-node-end node)))
-      (cond
-       ((or (markdown-ts-appear--callout-link-p parent)
-            (markdown-ts-appear-math--contains-p parent-beg parent-end))
-        (with-silent-modifications
-          (remove-list-of-text-properties
-           parent-beg parent-end
-           '(action button category follow-link help-echo keymap mouse-face)))
-        (dolist (overlay (overlays-in parent-beg parent-end))
-          (when (overlay-get overlay 'markdown-ts-appear--link-icon)
-            (delete-overlay overlay))))
-       ((and (equal (treesit-node-type node) "link_label")
-             (treesit-search-subtree parent "\\`link_text\\'"))
-        (with-silent-modifications
-          (if (and markdown-ts-hide-markup
-                   (not (markdown-ts-appear--node-visible-p node)))
-              (put-text-property beg end 'invisible markdown-ts-appear--markup-invisibility)
-            (markdown-ts-appear--remove-markup-invisibility beg end)))
-        nil)
-       ((not (markdown-ts-appear--node-ancestor parent "image"))
-        (let* ((wikilink-p (markdown-ts-appear--wikilink-bounds-for-node parent))
-               (alias-delimiter
-                (and wikilink-p
-                     (markdown-ts-appear--first-direct-child-of-type node "|")))
-               (alias-beg (and alias-delimiter (treesit-node-end alias-delimiter)))
-               (icon-beg (or alias-beg beg))
-               (visible-p
-                (or (markdown-ts-appear--region-visible-p parent-beg beg)
-                    (markdown-ts-appear--region-visible-p end parent-end))))
-          (when alias-beg
-            (with-silent-modifications
-              (markdown-ts-appear--native-link-button
-               beg end
-               (buffer-substring-no-properties
-                beg (treesit-node-start alias-delimiter)))))
-          (dolist (overlay (overlays-in beg end))
+  (prog1 (apply function node override start limit rest)
+    (when (markdown-ts-appear--active-p)
+      (let* ((parent (treesit-node-parent node))
+             (parent-beg (treesit-node-start parent))
+             (parent-end (treesit-node-end parent))
+             (beg (treesit-node-start node))
+             (end (treesit-node-end node)))
+        (cond
+         ((or (markdown-ts-appear--callout-link-p parent)
+              (markdown-ts-appear-math--contains-p parent-beg parent-end))
+          (with-silent-modifications
+            (remove-list-of-text-properties
+             parent-beg parent-end
+             '(action button category follow-link help-echo keymap mouse-face)))
+          (dolist (overlay (overlays-in parent-beg parent-end))
             (when (overlay-get overlay 'markdown-ts-appear--link-icon)
-              (delete-overlay overlay)))
-          (when (and markdown-ts-hide-markup (not visible-p))
-            (when wikilink-p
+              (delete-overlay overlay))))
+         ((and (equal (treesit-node-type node) "link_label")
+               (treesit-search-subtree parent "\\`link_text\\'"))
+          (with-silent-modifications
+            (if (and markdown-ts-hide-markup
+                     (not (markdown-ts-appear--node-visible-p node)))
+                (put-text-property beg end 'invisible markdown-ts-appear--markup-invisibility)
+              (markdown-ts-appear--remove-markup-invisibility beg end)))
+          nil)
+         ((not (markdown-ts-appear--node-ancestor parent "image"))
+          (let* ((wikilink-p (markdown-ts-appear--wikilink-bounds-for-node parent))
+                 (alias-delimiter
+                  (and wikilink-p
+                       (markdown-ts-appear--first-direct-child-of-type node "|")))
+                 (alias-beg (and alias-delimiter (treesit-node-end alias-delimiter)))
+                 (icon-beg (or alias-beg beg))
+                 (visible-p
+                  (or (markdown-ts-appear--region-visible-p parent-beg beg)
+                      (markdown-ts-appear--region-visible-p end parent-end))))
+            (when alias-beg
               (with-silent-modifications
-                (put-text-property (1- parent-beg) parent-beg
-                                   'invisible markdown-ts-appear--markup-invisibility)
-                (put-text-property parent-end (1+ parent-end)
-                                   'invisible markdown-ts-appear--markup-invisibility)
-                (when alias-beg
-                  (let* ((region markdown-ts-appear--region)
-                         (visible-beg (and region (marker-position (car region))))
-                         (visible-end (and region (marker-position (cdr region)))))
-                    (if (and visible-beg visible-end
-                             (< visible-beg alias-beg) (> visible-end beg))
-                        (let ((reveal-beg (max beg visible-beg))
-                              (reveal-end (min alias-beg visible-end)))
-                          (when (< beg reveal-beg)
-                            (put-text-property beg reveal-beg
-                                               'invisible markdown-ts-appear--markup-invisibility))
-                          (when (< reveal-end alias-beg)
-                            (put-text-property reveal-end alias-beg
-                                               'invisible markdown-ts-appear--markup-invisibility)))
-                      (put-text-property beg alias-beg
-                                         'invisible markdown-ts-appear--markup-invisibility))))))
-            (when-let* ((icon (markdown-ts-appear--icon
-                               (if wikilink-p 'wikilink 'link))))
-              (let ((overlay (make-overlay icon-beg (min (1+ icon-beg) end)
-                                           nil t nil)))
-                (overlay-put overlay 'markdown-ts-appear--link-icon t)
-                (overlay-put overlay 'before-string (concat icon " "))
-                (overlay-put overlay 'evaporate t))))))))))
+                (markdown-ts-appear--native-link-button
+                 beg end
+                 (buffer-substring-no-properties
+                  beg (treesit-node-start alias-delimiter)))))
+            (dolist (overlay (overlays-in beg end))
+              (when (overlay-get overlay 'markdown-ts-appear--link-icon)
+                (delete-overlay overlay)))
+            (when (and markdown-ts-hide-markup (not visible-p))
+              (when wikilink-p
+                (with-silent-modifications
+                  (put-text-property (1- parent-beg) parent-beg
+                                     'invisible markdown-ts-appear--markup-invisibility)
+                  (put-text-property parent-end (1+ parent-end)
+                                     'invisible markdown-ts-appear--markup-invisibility)
+                  (when alias-beg
+                    (let* ((region markdown-ts-appear--region)
+                           (visible-beg (and region (marker-position (car region))))
+                           (visible-end (and region (marker-position (cdr region)))))
+                      (if (and visible-beg visible-end
+                               (< visible-beg alias-beg) (> visible-end beg))
+                          (let ((reveal-beg (max beg visible-beg))
+                                (reveal-end (min alias-beg visible-end)))
+                            (when (< beg reveal-beg)
+                              (put-text-property beg reveal-beg
+                                                 'invisible markdown-ts-appear--markup-invisibility))
+                            (when (< reveal-end alias-beg)
+                              (put-text-property reveal-end alias-beg
+                                                 'invisible markdown-ts-appear--markup-invisibility)))
+                        (put-text-property beg alias-beg
+                                           'invisible markdown-ts-appear--markup-invisibility))))))
+              (when-let* ((icon (markdown-ts-appear--icon
+                                 (if wikilink-p 'wikilink 'link))))
+                (let ((overlay (make-overlay icon-beg (min (1+ icon-beg) end)
+                                             nil t nil)))
+                  (overlay-put overlay 'markdown-ts-appear--link-icon t)
+                  (overlay-put overlay 'before-string (concat icon " "))
+                  (overlay-put overlay 'evaporate t)))))))))))
 
 ;;; Buffer lifecycle
 
