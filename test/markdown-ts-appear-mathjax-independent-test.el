@@ -320,6 +320,41 @@
       (should (eq result (gethash (markdown-ts-appear-mathjax--key "x" nil)
                                   markdown-ts-appear-mathjax--cache))))))
 
+(ert-deftest markdown-ts-appear-mathjax-test-worker-failure-is-not-cached ()
+  (let ((markdown-ts-appear-mathjax--cache (make-hash-table :test #'equal))
+        (markdown-ts-appear-mathjax--pending (make-hash-table :test #'equal))
+        result)
+    (cl-letf (((symbol-function 'markdown-ts-appear-mathjax--entry) #'ignore)
+              ((symbol-function 'markdown-ts-appear-mathjax--send)
+               (lambda (_body _display callback)
+                 (funcall callback '((error . "MathJax worker stopped")) t))))
+      (markdown-ts-appear-mathjax-render "x" nil (lambda (entry) (setq result entry)))
+      (should (equal result '(:error "MathJax worker stopped" :retry t)))
+      (should (zerop (hash-table-count markdown-ts-appear-mathjax--cache))))))
+
+(ert-deftest appear-mj-worker-failures-are-retried ()
+  (appear-mj--buffer "Before $x$ after\n"
+    (let ((ov (car markdown-ts-appear-mathjax--objects)) callback (calls 0))
+      (cl-letf (((symbol-function 'markdown-ts-appear-mathjax-render)
+                 (lambda (_body _display ready) (cl-incf calls) (setq callback ready) nil)))
+        (overlay-put ov 'markdown-ts-appear-mathjax--entry nil)
+        (markdown-ts-appear-mathjax-refresh)
+        (should (= 1 calls))
+        (funcall callback (list :error "MathJax worker stopped" :retry t))
+        (should (equal (overlay-get ov 'help-echo) "MathJax worker stopped"))
+        (markdown-ts-appear-mathjax-refresh)
+        (should (= 2 calls))
+        ;; Formula errors are results, not transient failures.
+        (funcall callback (list :error "Invalid command"))
+        (markdown-ts-appear-mathjax-refresh)
+        (should (= 2 calls))))))
+
+(ert-deftest markdown-ts-appear-mathjax-test-integer-geometry-keeps-baseline ()
+  (should (= 50 (plist-get (markdown-ts-appear-mathjax--normalize
+                            "<svg style=\"vertical-align: -2ex\" width=\"2ex\" height=\"4ex\" viewBox=\"0 -1000 1000 2000\"></svg>"
+                            nil)
+                           :ascent))))
+
 (ert-deftest markdown-ts-appear-mathjax-test-one-fontification-scan ()
   (appear-mj--buffer "Before $x$ and **bold** and [link](https://example.org).\n\n$$y$$\n\nAfter\n"
     (let ((scan (symbol-function 'markdown-ts-appear-mathjax--scan)) (calls 0))

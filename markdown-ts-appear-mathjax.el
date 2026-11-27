@@ -220,7 +220,7 @@ MathJax.startup.promise.then(() => {
                    (format " %s=\"%.6fpt\"" (car pair) (cdr pair)) tag t t)))
       (list :svg (concat (substring svg 0 beg) tag (substring svg end))
             :width width :ex (/ height height-ex)
-            :ascent (if display -1 (max 0 (min 100 (round (* 100 (+ 1 (/ (or align 0) height-ex)))))))))))
+            :ascent (if display -1 (max 0 (min 100 (round (* 100 (+ 1 (/ (float (or align 0)) height-ex)))))))))))
 
 (defun markdown-ts-appear-mathjax--key (body display)
   "Return the content key for BODY, DISPLAY and this buffer's macros."
@@ -241,7 +241,8 @@ MathJax.startup.promise.then(() => {
 (defun markdown-ts-appear-mathjax-render (body display callback)
   "Return cached BODY in DISPLAY style, or nil and call CALLBACK when ready.
 Results are plists containing SVG geometry or an :error string. Identical
-pending requests share a compile. Setup failures are not cached."
+pending requests share a compile. Setup failures are not cached and carry
+a non-nil :retry."
   (let* ((key (markdown-ts-appear-mathjax--key body display))
          (entry (markdown-ts-appear-mathjax--entry key)))
     (if entry entry
@@ -264,7 +265,8 @@ pending requests share a compile. Setup failures are not cached."
                                       (list :error (alist-get 'error data))
                                     (markdown-ts-appear-mathjax--normalize (alist-get 'svg data) display))
                                 (error (setq setup t) (list :error (error-message-string err)))))
-                        (unless setup
+                        (if setup
+                            (setq result (plist-put result :retry t))
                           (puthash key result markdown-ts-appear-mathjax--cache)
                           (condition-case err
                               (progn
@@ -464,6 +466,11 @@ INLINE applies the dollar-closing whitespace/digit checks. Return its start."
       (when (and display (not (eq display old)))
         (run-hook-with-args 'markdown-ts-appear-mathjax-preview-functions ov display)))))
 
+(defun markdown-ts-appear-mathjax--settled-entry (ov)
+  "Return OV's result unless it is missing or a retryable worker failure."
+  (let ((entry (overlay-get ov 'markdown-ts-appear-mathjax--entry)))
+    (unless (plist-get entry :retry) entry)))
+
 (defun markdown-ts-appear-mathjax--request (ov)
   "Request OV's current formula, respecting source-only editing."
   (when (and (overlay-buffer ov) (not (overlay-get ov 'markdown-ts-appear-mathjax--pending))
@@ -577,7 +584,7 @@ INLINE applies the dollar-closing whitespace/digit checks. Return its start."
                 (when (file-exists-p file) (delete-file file)))
               (overlay-put ov 'markdown-ts-appear-mathjax--entry nil)
               (overlay-put ov 'markdown-ts-appear-mathjax--pending nil))
-            (if-let* ((entry (overlay-get ov 'markdown-ts-appear-mathjax--entry)))
+            (if-let* ((entry (markdown-ts-appear-mathjax--settled-entry ov)))
                 (overlay-put ov 'markdown-ts-appear-mathjax--image (markdown-ts-appear-mathjax--image ov entry))
               (markdown-ts-appear-mathjax--request ov))
             (markdown-ts-appear-mathjax--sync ov)))
@@ -600,7 +607,7 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
     (markdown-ts-appear-mathjax--reconcile)
     (without-restriction
       (dolist (ov markdown-ts-appear-mathjax--objects)
-        (if-let* ((entry (overlay-get ov 'markdown-ts-appear-mathjax--entry)))
+        (if-let* ((entry (markdown-ts-appear-mathjax--settled-entry ov)))
             (overlay-put ov 'markdown-ts-appear-mathjax--image (markdown-ts-appear-mathjax--image ov entry))
           (markdown-ts-appear-mathjax--request ov))
         (markdown-ts-appear-mathjax--sync ov)))))
@@ -619,7 +626,7 @@ With prefix RECOMPILE, invalidate this buffer's cached formulas first."
         (when (overlay-buffer ov)
           (when (and (not (markdown-ts-appear-mathjax--editing-p ov))
                      (or (overlay-get ov 'markdown-ts-appear-mathjax--modified)
-                         (not (overlay-get ov 'markdown-ts-appear-mathjax--entry))))
+                         (not (markdown-ts-appear-mathjax--settled-entry ov))))
             (let ((record (seq-find (lambda (record) (= (nth 1 record) (overlay-start ov)))
                                     (markdown-ts-appear-mathjax--scan (overlay-start ov) (overlay-end ov)))))
               (if record (markdown-ts-appear-mathjax--request (markdown-ts-appear-mathjax--ensure record))
