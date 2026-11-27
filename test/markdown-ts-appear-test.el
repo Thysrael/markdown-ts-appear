@@ -24,6 +24,7 @@
 (require 'ert)
 (require 'cl-lib)
 (defvar evil-mode-buffers)
+(defvar markdown-indent-mode)
 
 (add-to-list 'load-path
              (file-name-directory
@@ -1086,6 +1087,23 @@
       (dotimes (offset (buffer-size))
         (should (equal (get-text-property (1+ offset) 'wrap-prefix) "    "))))))
 
+(ert-deftest markdown-ts-appear-test-quote-wrap-outline-indent ()
+  (let ((markdown-indent-mode t))
+    (markdown-ts-appear-test--with-buffer "> > nested quote\n\nAfter\n"
+      (markdown-ts-appear--clear-prefixes (point-min) (point-max))
+      ;; markdown-indent-mode contributes outline indentation plus a raw >.
+      (put-text-property (point-min) (point-max) 'line-prefix "      ")
+      (put-text-property (point-min) (point-max) 'wrap-prefix "      > ")
+      (dotimes (_ 2)
+        (font-lock-flush) (font-lock-ensure)
+        (should (equal (get-text-property 10 'line-prefix) "      "))
+        (should (equal (get-text-property 10 'wrap-prefix) "      ▎ ▎ ")))
+      (goto-char 3) (markdown-ts-appear--update)
+      (should (equal (get-text-property 10 'wrap-prefix) "      ▎ > "))
+      (markdown-ts-appear-mode -1)
+      (should (equal (get-text-property 10 'line-prefix) "      "))
+      (should (equal (get-text-property 10 'wrap-prefix) "      > ")))))
+
 (ert-deftest markdown-ts-appear-test-quote-wrap-removed-after-edit ()
   (dolist (style '(raw connected))
     (markdown-ts-appear-test--with-buffer "> quote text\n\nAfter\n"
@@ -1297,6 +1315,41 @@
     (markdown-ts-appear-mode -1)
     (should (equal (get-text-property (point) 'line-prefix) "    "))
     (should-not (get-text-property (point) 'display))))
+
+(ert-deftest markdown-ts-appear-test-code-wrap-outline-indent ()
+  (let ((markdown-indent-mode t))
+    (dolist (column '(0 3))
+      (markdown-ts-appear-test--with-buffer
+          (concat (make-string column ?\s) "```text\n        payload\n\tmore\n\n"
+                  (make-string column ?\s) "```\n\nAfter\n")
+        (setq-local tab-width 8)
+        (markdown-ts-appear--clear-prefixes (point-min) (point-max))
+        (put-text-property (point-min) (point-max) 'line-prefix "      ")
+        (goto-char (point-min))
+        (while (not (eobp))
+          (put-text-property (point) (line-beginning-position 2) 'wrap-prefix
+                             (make-string (+ 6 (current-indentation)) ?\s))
+          (forward-line 1))
+        (dotimes (_ 2)
+          (font-lock-flush) (font-lock-ensure)
+          (goto-char (point-min)) (forward-line 1)
+          (dotimes (_ 2)
+            (end-of-line)
+            (let* ((prefix (get-text-property (1- (point)) 'wrap-prefix))
+                   (expected (concat (make-string (+ 6 column) ?\s) "│ "
+                                     (make-string (- 8 column) ?\s))))
+              (should (equal prefix expected))
+              (should (= (+ 6 column)
+                         (string-search "│" (markdown-ts-appear-test--displayed-line))))
+              (should (memq 'markdown-ts-code-block-markup-hidden
+                            (get-text-property (1- (length prefix)) 'face prefix))))
+            (forward-line 1))
+          (should (equal (get-text-property (point) 'wrap-prefix)
+                         (concat (make-string (+ 6 column) ?\s) "│ "))))
+        (markdown-ts-appear-mode -1)
+        (goto-char (point-min)) (forward-line 1)
+        (should (equal (get-text-property (point) 'line-prefix) "      "))
+        (should (equal (get-text-property (point) 'wrap-prefix) (make-string 14 ?\s)))))))
 
 (ert-deftest markdown-ts-appear-test-indented-fence-tabs-and-unclosed-body ()
   (markdown-ts-appear-test--with-buffer "   ```text\n\tpayload\n\nshort\n"

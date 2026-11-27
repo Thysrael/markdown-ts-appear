@@ -305,12 +305,6 @@ uses `line-prefix' so its rendered quote markers replace the raw wrap suffix."
            pos next (list property prefix 'markdown-ts-appear--decoration t))
           (setq pos next))))))
 
-(defun markdown-ts-appear--decorate-line-prefix (beg end prefix face)
-  "Display PREFIX with FACE before visual lines between BEG and END."
-  (let ((display (propertize prefix 'face face)))
-    (dolist (property '(line-prefix wrap-prefix))
-      (markdown-ts-appear--decorate-prefix beg end property display))))
-
 (defun markdown-ts-appear--remove-markup-invisibility (beg end)
   "Remove Markdown markup invisibility between BEG and END."
   (let ((pos beg))
@@ -1078,12 +1072,28 @@ at most one following space or tab and are not clipped to START or LIMIT."
         ;; so it gets the block face explicitly, as the fence lines do.
         (if (not (markdown-ts-appear--node-ancestor
                   (treesit-node-parent node) "block_quote"))
-            (let ((prefix (concat (make-string column ?\s) "│ "))
-                  (face (list 'markdown-ts-appear-code-fence-marker block-face)))
+            (let* ((prefix (concat (make-string column ?\s) "│ "))
+                   (face (list 'markdown-ts-appear-code-fence-marker block-face))
+                   (display (propertize prefix 'face face)))
+              (if (bound-and-true-p markdown-indent-mode)
+                  ;; Keep outline indentation before the rail, and source
+                  ;; indentation after it, rather than shifting the rail.
+                  (save-excursion
+                    (goto-char beg)
+                    (beginning-of-line)
+                    (while (< (point) end)
+                      (markdown-ts-appear--decorate-prefix
+                       (max beg (point)) (min end (line-beginning-position 2))
+                       'wrap-prefix
+                       (propertize
+                        (concat prefix
+                                (make-string (max 0 (- (current-indentation) column)) ?\s))
+                        'face face)
+                       'line-prefix)
+                      (forward-line 1)))
+                (markdown-ts-appear--decorate-prefix beg end 'wrap-prefix display))
               (if (zerop column)
-                  (markdown-ts-appear--decorate-line-prefix beg end prefix face)
-                (markdown-ts-appear--decorate-prefix beg end 'wrap-prefix
-                                                     (propertize prefix 'face face))
+                  (markdown-ts-appear--decorate-prefix beg end 'line-prefix display)
                 (save-excursion
                   (goto-char beg)
                   (unless (bolp) (forward-line 1))
@@ -1093,7 +1103,7 @@ at most one following space or tab and are not clipped to START or LIMIT."
                       (if (= line-beg (point))
                           (markdown-ts-appear--decorate-prefix
                            line-beg (min end (line-beginning-position 2)) 'line-prefix
-                           (propertize prefix 'face face))
+                           display)
                         (markdown-ts-appear--decorate
                          line-beg (min end (point)) (concat prefix extra) face)))
                     (forward-line 1)))))
@@ -1211,8 +1221,10 @@ Fenced code owns its continuation-prefix rendering."
              0 (length display) 'markdown-ts-block-quote t display)
             (markdown-ts-appear--decorate-prefix
              beg end 'wrap-prefix display
-             ;; Visual Wrap already includes the source indentation.
-             (when (bound-and-true-p visual-wrap-prefix-mode) 'line-prefix))))))))
+             ;; These modes already include raw quote syntax in wrap-prefix.
+             (when (or (bound-and-true-p visual-wrap-prefix-mode)
+                       (bound-and-true-p markdown-indent-mode))
+               'line-prefix))))))))
 
 (defun markdown-ts-appear--fontify-quote-marker (node visible-p start limit)
   "Render NODE's quote markers between START and LIMIT unless VISIBLE-P."
