@@ -1217,7 +1217,11 @@ NOERROR and REST retain the native command's boundary behavior and options."
   "Render tables around edits that have lost their overlays."
   ;; Let `markdown-ts-appear-table--update-visibility' hide new rows too.
   (markdown-ts-appear-table--restore-view)
-  (let ((editing (markdown-ts-appear-table--reveal-bounds)) pending)
+  (let ((editing (markdown-ts-appear-table--reveal-bounds))
+        ;; Folding clears the cache to force a full idle rebuild; keep it cleared.
+        (windows (or markdown-ts-appear-table--windows
+                     (markdown-ts-appear-table--window-state)))
+        pending)
     (without-restriction
       (dolist (range markdown-ts-appear-table--dirty)
         (let (deferred)
@@ -1227,7 +1231,7 @@ NOERROR and REST retain the native command's boundary behavior and options."
              ((not (or (outline-invisible-p (treesit-node-start table))
                        (get-char-property (treesit-node-start table)
                                           'markdown-ts-appear-table--wrapped)))
-              (markdown-ts-appear-table--render-table table markdown-ts-appear-table--windows))))
+              (markdown-ts-appear-table--render-table table windows))))
           (when deferred (push range pending)))))
     (setq markdown-ts-appear-table--dirty (nreverse pending)))
   (markdown-ts-appear-table--update-visibility))
@@ -1252,11 +1256,11 @@ OLD-LENGTH is the length of the replaced text."
 
 (defun markdown-ts-appear-table--invalidate (beg end)
   "Drop overlays of tables between BEG and END and queue them for rebuilding."
-  (let ((previous (car markdown-ts-appear-table--dirty)))
-    (if (and previous (<= beg (cdr previous)) (>= end (car previous)))
-        (progn (set-marker (car previous) (min beg (car previous)))
-               (set-marker (cdr previous) (max end (cdr previous))))
-      (push (cons (copy-marker beg) (copy-marker end t)) markdown-ts-appear-table--dirty)))
+  (if-let* ((range (seq-find (lambda (range) (and (<= beg (cdr range)) (>= end (car range))))
+                             markdown-ts-appear-table--dirty)))
+      (progn (set-marker (car range) (min beg (car range)))
+             (set-marker (cdr range) (max end (cdr range))))
+    (push (cons (copy-marker beg) (copy-marker end t)) markdown-ts-appear-table--dirty))
   (when-let* ((tables (seq-keep (lambda (overlay)
                                   (overlay-get overlay 'markdown-ts-appear-table--wrapped))
                                 (overlays-in beg end))))

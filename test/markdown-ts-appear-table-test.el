@@ -1020,6 +1020,30 @@
             (should (= calls 2))
             (should-not markdown-ts-appear-table--dirty)))))))
 
+(ert-deftest markdown-ts-appear-table-test-edit-after-folding-renders ()
+  (let ((markdown-ts-appear-table-reveal 'table))
+    (markdown-ts-appear-table-test--with-buffer
+        "| A | B |\n|---|---|\n| first | x |\n\nAfter\n" 30
+      (goto-char (point-min)) (search-forward "first")
+      (insert "!") (run-hooks 'post-command-hook)
+      (markdown-ts-appear-table--outline-change)
+      (goto-char (point-max)) (run-hooks 'post-command-hook)
+      (should-not markdown-ts-appear-table--dirty)
+      (should (= 3 (length (markdown-ts-appear-table-test--overlays))))
+      ;; The idle rebuild requested by folding is still pending.
+      (should-not markdown-ts-appear-table--windows))))
+
+(ert-deftest markdown-ts-appear-table-test-dirty-ranges-merge ()
+  (markdown-ts-appear-table-test--with-buffer
+      (concat "| A | B |\n|---|---|\n| first | x |\n\n" (make-string 80 ?a) "\n") 30
+    (dolist (range '((10 . 20) (50 . 60) (52 . 58) (12 . 18)))
+      (markdown-ts-appear-table--invalidate (car range) (cdr range)))
+    (should (equal (sort (mapcar (lambda (range) (cons (marker-position (car range))
+                                                       (marker-position (cdr range))))
+                                 markdown-ts-appear-table--dirty)
+                         #'car-less-than-car)
+                   '((10 . 20) (50 . 60))))))
+
 (ert-deftest markdown-ts-appear-table-test-whole-table-move-to-another-table ()
   (let ((markdown-ts-appear-table-reveal 'table))
     (markdown-ts-appear-table-test--with-buffer
