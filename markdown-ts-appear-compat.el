@@ -22,11 +22,14 @@
 (defalias 'markdown-ts-appear--native-image-alone-p #'markdown-ts--image-alone-on-line-p)
 (defalias 'markdown-ts-appear--native-set-hide-markup #'markdown-ts--set-hide-markup)
 (defalias 'markdown-ts-appear--native-link-button #'markdown-ts--make-link-button)
-(defalias 'markdown-ts-appear--native-decode-destination
-  ;; Emacs 31 only strips the optional <...> wrapper, inside its buttons.
+(defun markdown-ts-appear--native-decode-destination (destination)
+  "Return the URL or file name denoted by link DESTINATION."
   (if (fboundp 'markdown-ts--decode-destination)
-      #'markdown-ts--decode-destination
-    #'markdown-ts--unbracket-destination))
+      (funcall #'markdown-ts--decode-destination destination)
+    ;; Emacs 31.1 has no destination decoder; strip only the <...> wrapper.
+    (if (and (string-prefix-p "<" destination) (string-suffix-p ">" destination))
+        (substring destination 1 -1)
+      destination)))
 
 (defconst markdown-ts-appear--visible-fontifiers
   '(markdown-ts--fontify-atx-heading
