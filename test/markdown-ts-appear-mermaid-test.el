@@ -104,6 +104,22 @@
         (should (equal (nth 2 (car markdown-ts-appear-diagram--job)) "flowchart LR\nA --> B\n"))
         (should-not (buffer-modified-p))))))
 
+(ert-deftest markdown-ts-appear-mermaid-test-shared-cache-clears-error ()
+  (markdown-ts-appear-mermaid-test--deferred
+    (markdown-ts-appear-mermaid-test--buffer markdown-ts-appear-mermaid-test--diagram
+      (markdown-ts-appear-mermaid-test--deliver "Renderer crashed")
+      (let ((source (car markdown-ts-appear-diagram--objects)))
+        (should (overlay-get source 'markdown-ts-appear-diagram--error))
+        ;; An identical block elsewhere rendered successfully.
+        (puthash (overlay-get source 'markdown-ts-appear-diagram--key)
+                 (list 'image :type 'svg :data markdown-ts-appear-mermaid-test--svg)
+                 markdown-ts-appear-diagram--cache)
+        (setq markdown-ts-appear-diagram--view-state nil)
+        (markdown-ts-appear-diagram--refresh t)
+        (should (overlay-get source 'markdown-ts-appear-diagram--image))
+        (should-not (overlay-get source 'markdown-ts-appear-diagram--error))
+        (should-not (overlay-get (markdown-ts-appear-mermaid-test--view) 'help-echo))))))
+
 (ert-deftest markdown-ts-appear-mermaid-test-ignores-other-and-unclosed-fences ()
   (dolist (text '("```text\nflowchart LR\nA --> B\n```\n"
                   "    ```mermaid\n    A --> B\n    ```\n"
