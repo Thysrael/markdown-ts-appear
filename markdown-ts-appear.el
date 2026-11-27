@@ -1518,6 +1518,34 @@ Fenced code owns its continuation-prefix rendering."
   (with-suppressed-warnings ((obsolete outline-view-change-hook))
     (remove-hook 'outline-view-change-hook function t)))
 
+(defun markdown-ts-appear--window-views (source property windows beg end &rest properties)
+  "Return SOURCE's PROPERTY views for WINDOWS, each spanning BEG to END.
+Reuse each window's existing view, create missing ones with PROPERTIES and
+delete views whose window is no longer listed.  A nil window means all windows."
+  (let* ((old (overlay-get source property))
+         (views
+          (mapcar
+           (lambda (window)
+             (let ((view (or (seq-find (lambda (view)
+                                         (and (overlay-buffer view)
+                                              (eq (overlay-get view 'window) window)))
+                                       old)
+                             (let ((view (make-overlay beg end nil t nil))
+                                   (properties properties))
+                               (overlay-put view 'window window)
+                               (while properties
+                                 (overlay-put view (pop properties) (pop properties)))
+                               view))))
+               (unless (and (= beg (overlay-start view)) (= end (overlay-end view)))
+                 (move-overlay view beg end))
+               view))
+           windows)))
+    (dolist (view old)
+      (unless (memq view views) (delete-overlay view)))
+    (unless (equal views old)
+      (overlay-put source property views))
+    views))
+
 (defun markdown-ts-appear--delete-rendering-overlays (&optional beg end)
   "Delete package icon overlays between BEG and END, or throughout the buffer."
   (without-restriction

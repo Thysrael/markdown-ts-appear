@@ -31,6 +31,7 @@
 ;;; Code:
 
 (require 'markdown-ts-appear-compat)
+(require 'cl-lib)
 (require 'outline)
 (require 'image)
 (require 'seq)
@@ -43,6 +44,7 @@
 (declare-function markdown-ts-appear--node-ancestor "markdown-ts-appear")
 (declare-function markdown-ts-appear--add-outline-hook "markdown-ts-appear")
 (declare-function markdown-ts-appear--remove-outline-hook "markdown-ts-appear")
+(declare-function markdown-ts-appear--window-views "markdown-ts-appear")
 
 (defvar-local markdown-ts-appear-image--sources nil
   "Source overlays holding cached images and their window-specific previews.")
@@ -89,42 +91,27 @@
 (defun markdown-ts-appear-image--sync-views (source &optional widths)
   "Synchronize SOURCE's cached image with its buffer's windows.
 WIDTHS is an optional alist of windows and preview widths, shared by a batch."
-  (let ((image (overlay-get source 'markdown-ts-appear-image--image))
-        (alone (overlay-get source 'markdown-ts-appear-image--alone))
-        (old (overlay-get source 'markdown-ts-appear-image--views))
-        views)
-    (when (and (overlay-buffer source) image markdown-ts-inline-images
-               (display-images-p)
-               (not (outline-invisible-p (overlay-start source))))
-      (dolist (entry (or widths (markdown-ts-appear-image--window-widths)))
-        (let* ((window (car entry))
-               (width (cdr entry))
-               (end (overlay-end source))
-               (view (seq-find (lambda (overlay)
-                                 (and (overlay-buffer overlay)
-                                      (eq window (overlay-get overlay 'window))))
-                               old))
-               (key (and view (overlay-get view 'markdown-ts-appear-image--view-key))))
-          (unless view
-            (setq view (make-overlay (1- end) end nil t nil))
-            (overlay-put view 'window window)
-            (overlay-put view 'markdown-ts-image t)
-            (overlay-put view 'markdown-ts-appear-image--owner source)
-            (overlay-put view 'evaporate t))
-          (unless (and (= (overlay-start view) (1- end)) (= (overlay-end view) end))
-            (move-overlay view (1- end) end))
-          (unless (and (eq image (car key)) (equal (cdr key) (list width alone)))
-            (let* ((spec (cons 'image (plist-put (copy-sequence (cdr image))
-                                               :max-width width)))
-                   (text (propertize " " 'display spec)))
-              (overlay-put view 'after-string (if alone (concat "\n" text) text)))
-            (overlay-put view 'markdown-ts-appear-image--view-key (list image width alone)))
-          (push view views))))
-    (dolist (view old)
-      (unless (memq view views) (delete-overlay view)))
-    (setq views (nreverse views))
-    (unless (equal views old)
-      (overlay-put source 'markdown-ts-appear-image--views views))))
+  (let* ((image (overlay-get source 'markdown-ts-appear-image--image))
+         (alone (overlay-get source 'markdown-ts-appear-image--alone))
+         (end (overlay-end source))
+         (widths (and end image markdown-ts-inline-images (display-images-p)
+                      (not (outline-invisible-p (overlay-start source)))
+                      (or widths (markdown-ts-appear-image--window-widths)))))
+    (cl-mapc
+     (lambda (view entry)
+       (let ((width (cdr entry))
+             (key (overlay-get view 'markdown-ts-appear-image--view-key)))
+         (unless (and (eq image (car key)) (equal (cdr key) (list width alone)))
+           (let* ((spec (cons 'image (plist-put (copy-sequence (cdr image))
+                                              :max-width width)))
+                  (text (propertize " " 'display spec)))
+             (overlay-put view 'after-string (if alone (concat "\n" text) text)))
+           (overlay-put view 'markdown-ts-appear-image--view-key (list image width alone)))))
+     (markdown-ts-appear--window-views
+      source 'markdown-ts-appear-image--views (mapcar #'car widths)
+      (and end (1- end)) end
+      'markdown-ts-image t 'markdown-ts-appear-image--owner source 'evaporate t)
+     widths)))
 
 (defun markdown-ts-appear-image--update-source (source node)
   "Update SOURCE from image NODE, reusing unchanged image files."
