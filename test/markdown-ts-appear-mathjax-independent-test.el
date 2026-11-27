@@ -230,6 +230,17 @@
     (should-not latex-to-svg-for-markdown-mode)
     (should-not latex-to-svg-frontend-mode)))
 
+(ert-deftest appear-mj-renderer-change-keeps-independent-mode ()
+  (appear-mj--buffer "Before $x$ after\n"
+    (markdown-ts-appear-mode -1)
+    (setq-local markdown-ts-appear-enable-math-preview nil)
+    (markdown-ts-appear-mathjax-mode 1)
+    (markdown-ts-appear-mode 1)
+    (setq-local markdown-ts-appear-math-renderer 'latex-to-svg)
+    (markdown-ts-appear-math--restart)
+    (should markdown-ts-appear-mathjax-mode)
+    (markdown-ts-appear-mathjax-mode -1)))
+
 (ert-deftest appear-mj-gui-real-images-and-source-only ()
   (skip-unless (display-graphic-p))
   (let ((markdown-ts-appear-mathjax-cache-directory (make-temp-file "mathjax-gui-" t))

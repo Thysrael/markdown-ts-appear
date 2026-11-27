@@ -269,14 +269,16 @@ Use existing preview overlays; this never requests or compiles an image."
   (markdown-ts-appear-math--watch-images))
 
 (defun markdown-ts-appear-math--restart ()
-  "Switch an active appear buffer to its explicitly selected math renderer."
+  "Switch an active appear buffer to its explicitly selected math renderer.
+Independently enabled math modes are kept unless appear enables previews."
   (markdown-ts-appear-math--teardown)
-  (when (bound-and-true-p markdown-ts-appear-mathjax-mode)
-    (markdown-ts-appear-mathjax-mode -1))
-  (when (bound-and-true-p latex-to-svg-for-markdown-mode)
-    (latex-to-svg-for-markdown-mode -1))
-  (when (bound-and-true-p latex-to-svg-frontend-mode)
-    (latex-to-svg-frontend-mode -1))
+  (when markdown-ts-appear-enable-math-preview
+    (when (bound-and-true-p markdown-ts-appear-mathjax-mode)
+      (markdown-ts-appear-mathjax-mode -1))
+    (when (bound-and-true-p latex-to-svg-for-markdown-mode)
+      (latex-to-svg-for-markdown-mode -1))
+    (when (bound-and-true-p latex-to-svg-frontend-mode)
+      (latex-to-svg-frontend-mode -1)))
   (markdown-ts-appear-math--setup))
 
 (defun markdown-ts-appear-math--detach ()
