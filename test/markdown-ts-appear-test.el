@@ -1028,6 +1028,13 @@
       (should (stringp (overlay-get overlay 'before-string)))
       (should (equal (overlay-get overlay 'help-echo) "images/demo.gif")))))
 
+(ert-deftest markdown-ts-appear-test-image-label-decodes-destination ()
+  (markdown-ts-appear-test--with-buffer "![](<images/my demo.gif>)\n"
+    (goto-char (point-min))
+    (search-forward "<")
+    (should (equal (get-text-property (point) 'display) "my demo.gif"))
+    (should (equal (get-text-property (point) 'help-echo) "images/my demo.gif"))))
+
 (ert-deftest markdown-ts-appear-test-renders-and-reveals-block-quote ()
   (markdown-ts-appear-test--with-buffer "> quote\n> continued\n"
     (goto-char (point-min))

@@ -1344,7 +1344,8 @@ Fenced code owns its continuation-prefix rendering."
                    (not (outline-invisible-p beg)))
           (let* ((description
                   (treesit-search-subtree parent "\\`image_description\\'"))
-                 (url (treesit-node-text node t))
+                 (url (markdown-ts-appear--native-decode-destination
+                       (treesit-node-text node t)))
                  (label (file-name-nondirectory url))
                  (icon (markdown-ts-appear--icon 'image)))
             (with-silent-modifications
